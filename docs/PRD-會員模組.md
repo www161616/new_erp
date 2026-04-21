@@ -15,6 +15,22 @@ tags: [PRD, ERP, 會員, Member, Points, Wallet, QRCode]
 
 ---
 
+## 0. 🚨 加盟店模式 Review（2026-04-21）
+
+本 PRD 原設計基於「單一 tenant」會員池假設。經加盟店模式 review 後必須調整：
+
+- **會員分店獨立**：`members` 加 `store_id NOT NULL`；UNIQUE 範圍從 `(tenant, phone_hash)` 改 `(tenant, store, phone_hash)`。同一支手機在 A / B 店各自辦會員 = 兩筆獨立紀錄。
+- **點數 / 儲值金分店**：`points_ledger.member_id` 天然繼承 store scope、不跨店累積。
+- **line_user_id 移出 members**：改為新表 `member_line_bindings (member_id, store_id, line_user_id)`（LINE OA 機制同會員不同店不同 user_id）。
+- **GDPR 刪除**：僅影響該店 member 記錄、不動他店同手機會員。
+- **Q1 手機識別**：在 store 範圍內唯一。
+- **Q2 手機重辦阻擋**：從 tenant 降為 **store 內阻擋**（跨店可重辦）。
+- **Q16 跨 tenant**：不跨（原本決定）；進一步**連 tenant 內跨 store 也不共享**。
+
+**對應 schema issue**：[#83](https://github.com/www161616/new_erp/issues/83)（新增）
+
+---
+
 ## 1. 模組定位
 - [ ] 會員主檔 **Single Source of Truth**；銷售 / 促銷 / 行銷只讀
 - [ ] 提供三類識別管道：**手機號** / **實體會員卡（條碼）** / **虛擬會員卡（LIFF 動態 QR code）**
