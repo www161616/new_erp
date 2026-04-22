@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const { session, loading, user, signOut } = useAuth();
@@ -43,6 +44,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
           </Link>
         </nav>
         <div className="flex items-center gap-3 text-sm">
+          <ThemeToggle />
           <span className="text-zinc-500">{user?.email}</span>
           <button
             onClick={onLogout}
