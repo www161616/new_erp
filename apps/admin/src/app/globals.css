@@ -3,13 +3,15 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* zinc-100 底、zinc-800 字 — 避免純白刺眼 */
+  --background: #f4f4f5;
+  --foreground: #27272a;
 }
 
 .dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* zinc-900 底、zinc-200 字 — 避免純黑過沉 */
+  --background: #18181b;
+  --foreground: #e4e4e7;
 }
 
 @theme inline {
