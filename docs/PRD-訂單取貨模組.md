@@ -1,10 +1,11 @@
 ---
 title: PRD - 訂單 / 取貨模組
 module: Order
-status: draft-v0.1
+status: draft-v0.1.1
 owner: alex.chen
 created: 2026-04-21
-tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
+updated: 2026-04-22
+tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
 ---
 
 # PRD — 訂單 / 取貨模組（Order / Pickup Module）
@@ -95,9 +96,18 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 - [ ] **收單上限（Campaign Cap）**：單品 / 整團的訂購總量上限；到上限自動關團或該品項轉為「候補」
 - [ ] **LINE 頻道（Channel）**：一個 LINE 社群（OpenChat），對應一個 home_location 門市或多門市共用
 - [ ] **社群暱稱（Nickname）**：顧客在 LINE 社群中的顯示名，**非唯一**可改
+- [ ] **顧客暱稱格式規則**（2026-04-21 新增）：建議標準格式 `{姓名}-{手機後6碼}-{取貨店}`
+  - **多對多社群**（一個 LINE 社群對應多家取貨店）：**必須含取貨店**，否則無法判斷去哪取
+  - **1:1 社群**（一個 LINE 社群只對應單一門市）：**取貨店可省略**，系統預設為該社群唯一對應門市
+  - 格式由小幫手登打時提醒顧客；非強制、但強烈建議以降低綁定錯誤率
 - [ ] **身份對應（Alias）**：`nickname ↔ member_id` 的人工綁定紀錄，之後自動帶入
 - [ ] **顧客訂單（Customer Order）**：一位顧客一次下訂 = 一筆 `customer_orders`，可含多品項
 - [ ] **結單（Campaign Close）**：停止收單，觸發後續採購 / 配送流程
+- [ ] **結團類型（Close Type）**（2026-04-21 新增）：依收單期間長短區分
+  - **常規團（regular）**：3 天收單（預設型態）
+  - **快速團（fast）**：1.5 天收單（急單 / 限時搶購）
+  - **限量團（limited）**：總量達 cap 即關團（配合 Q1 cap 邏輯、不限時長）
+  - 欄位：`group_buy_campaigns.close_type ENUM('regular','fast','limited') DEFAULT 'regular'`
 - [ ] **取貨（Pickup）**：顧客到門市領取已到貨商品，觸發 POS 結算
 
 ---
@@ -121,7 +131,8 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 - [ ] ❌ **顧客自助下單頁**（v1 純靠 LINE 社群 +N；P1 可考慮 LIFF 下單）
 - [ ] ❌ **訂單拆單 / 合單**（v1 一筆顧客訂單對應一筆取貨）
 - [ ] ❌ **預付定金**（v1 取貨才付款）
-- [ ] ❌ **LINE Pay 等行動支付**（銷售 Q9 已排除 v1）
+- [ ] ❌ **LINE Pay 等行動支付**（銷售 Q9 已排除 v1；架構上 `stores.allowed_payment_methods` 已預留、但 v1 各店實際可選值只有 `cash`；P1 再開放各加盟店自主啟用 LINE Pay）
+- [ ] ❌ **開立統一發票**（v1 暫不開 ⚠️ **法遵風險**，見 §13 Q17；上線前必須由會計師確認）
 
 ---
 
@@ -204,6 +215,7 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
   - Autocomplete：
     - 打 LINE 暱稱 → 顯示既有 aliases + 會員資料
     - 新暱稱 → 提示「新綁定」→ 輸入手機 → 系統建 member + alias
+    - **暱稱格式提示**（2026-04-21）：若顧客暱稱非 `{姓名}-{手機後6碼}-{取貨店}` 標準格式、UI 顯示 soft warning 提醒小幫手請顧客補齊（尤其多對多社群必含取貨店）
   - Draft 自動存檔（30s）
 - [ ] **P1 路徑（截圖解析）**：
   - 上傳 1 或多張 LINE 頻道截圖
@@ -269,7 +281,12 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
   - 呼叫銷售模組建立 `pos_sale` + `pos_sale_items`
   - POS 觸發 `rpc_outbound` 扣庫存 + `rpc_release` 釋放 reserved
   - POS 觸發 `rpc_earn_points` 會員點數
-  - 顧客付款（v1 只收現金）
+  - **顧客付款**（2026-04-21 重寫）：
+    - v1 **全面只收現金**（延續 §5 Non-Goals、銷售 Q9）
+    - 架構上 `stores.allowed_payment_methods JSONB` 欄位已預留（為 P1 LINE Pay 鋪路）
+    - **v1 各店實際可選值只有 `['cash']`**、系統 enforce（不允許店家自行加 LINE Pay）
+    - P1 再開放各加盟店勾選是否啟用 LINE Pay（per-store 自主，延續加盟店自主權）
+    - 發票處理：見 §13 Q17（v1 暫不開、上線前必決）
 - [ ] **逾期未取**：
   - 超過取貨期限未取 → `order.status = expired`
   - 釋放 reserved 庫存
@@ -290,6 +307,96 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 - [ ] 各頻道活躍度：下單數 / 取貨率
 - [ ] 顧客忠誠度：重複下單次數
 - [ ] 逾期未取清單
+
+### 7.10 員工團購（Employee Group-Buy）（2026-04-21 新增）
+
+- [ ] **身份辨識**：登打時若 `members.is_employee = true` → 自動套員工價、標記 `customer_orders.order_type = 'employee'`
+- [ ] **員工價規則**：
+  - 員工價 = 本次團購價 × **員工折數**（預設 **75%**，範圍 70%~80%，per-tenant 可設）
+  - `customer_order_items.unit_price` 記員工價、`discount_reason = 'employee_discount'`
+  - 員工折數沿用銷售模組既有設定（若有）、否則本模組建 `tenant_settings.employee_discount_rate`
+- [ ] **結算方式**（對齊銷售模組 `employee_meals` 月結）：
+  - 取貨時**不當場收錢、不開 POS 發票**
+  - 訂單自動寫入 `employee_meals` 月結表（或等價機制）
+  - 月底結薪時一次從薪資扣除 / 員工繳款
+  - `customer_orders.payment_status = 'pending_monthly_settlement'`
+- [ ] **權限 / 反濫用**：
+  - 員工僅能用自己的 `member_id` 下訂（不得代購他人帳號）
+  - 同活動同員工 UNIQUE 限制維持（Q6）
+  - 員工下訂數量若明顯異常（例：單次 > 10 份）→ UI 顯示警告、需店長 confirm
+- [ ] **加盟店自主**：
+  - 加盟店可**自行調整員工折數**（70~80% 之間、或完全不提供員工優惠）
+  - 設定欄位：`stores.employee_discount_rate`（NULL = 沿用 tenant 預設）
+- [ ] **schema 新增**（或對齊銷售模組）：
+  ```sql
+  ALTER TABLE customer_orders
+    ADD COLUMN order_type TEXT NOT NULL DEFAULT 'regular'
+      CHECK (order_type IN ('regular','employee','guest')),
+    ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (payment_status IN ('pending','paid','pending_monthly_settlement','refunded'));
+
+  ALTER TABLE stores
+    ADD COLUMN employee_discount_rate NUMERIC(3,2);  -- NULL = 沿用 tenant default
+  ```
+
+### 7.11 退貨流程（Returns）（2026-04-21 新增）
+
+- [ ] **退貨時機**：
+  - v1 **限當天內退貨**（取貨當日該店營業時間內）
+  - 隔天起一律不受理（若顧客堅持、走客訴彈性處理、不進本系統流程）
+- [ ] **退貨可否判斷**（店員彈性 + 商品類型差異）：
+  | storage_type | 是否可退 | 備註 |
+  |---|---|---|
+  | 冷藏 refrigerated / 冷凍 frozen | ⚠️ 原則不退 | 食安風險、除非開箱即瑕疵 |
+  | 美食列車 meal_train | ❌ 不可退 | 當天食品、離店即無法判斷 |
+  | 常溫 room_temp / 非食品 | ✅ 可退 | 包裝完整、店員判斷 |
+  - 最終判斷權：**店員彈性**（延續寬鬆哲學）、爭議時升店長
+- [ ] **退品虛擬倉位**（兩個）：
+  - **退貨倉（`warehouse_type = 'return'`）**：商品已損壞 / 不可再出 → 最終**報廢銷毀**（走 `stock_movements.movement_type = 'damage'`）
+  - **瑕疵品倉（`warehouse_type = 'defective'`）**：商品完好但顧客悔單 / 輕微瑕疵 → **再處理**（內部消化 / 折扣出清 / 退回供應商）
+- [ ] **退貨流程**：
+  1. 店員開「退貨單」（引用原 `customer_order_items`）
+  2. 選退貨原因（下拉：品項錯誤 / 品質問題 / 顧客悔單 / 過期 / 其他）+ 選去向倉位
+  3. 系統觸發：
+     - `rpc_return_to_stock(order_item_id, qty, warehouse_type, reason)`
+     - 記 `order_returns`
+     - 若 warehouse_type = `return` → 寫 `stock_movements` movement_type='damage'
+     - 若 warehouse_type = `defective` → 寫 `stock_movements` movement_type='adjust_in'（進瑕疵虛擬倉）
+  4. **退款處理**：
+     - v1 顧客已付現金 → 現場現金退費（POS 建立 `pos_refund` 記錄）
+     - 員工團購 order_type='employee' → 從月結 `employee_meals` 扣除
+  5. 原 `customer_order_items.returned_qty` 累加、log 一筆 `order_return_events`
+- [ ] **金額 / 權限**：
+  - 店員可自主判斷（延續寬鬆哲學）、但**單筆退款金額 > 500 元** 需店長二次確認
+  - 所有退貨單留 `operator_id` + `manager_approval_id`（若有）稽核
+- [ ] **加盟店自主**：
+  - 加盟店可自行設定更嚴格的退貨標準（例：某些店連常溫也不退）
+  - 設定欄位：`stores.return_policy JSONB`（可覆寫總部預設）
+- [ ] **schema 新增**：
+  ```sql
+  CREATE TABLE order_returns (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    store_id BIGINT NOT NULL REFERENCES stores(id),
+    order_id BIGINT NOT NULL REFERENCES customer_orders(id),
+    order_item_id BIGINT NOT NULL REFERENCES customer_order_items(id),
+    qty NUMERIC(18,3) NOT NULL,
+    reason TEXT NOT NULL,
+    warehouse_type TEXT NOT NULL CHECK (warehouse_type IN ('return','defective')),
+    refund_amount NUMERIC(18,2) DEFAULT 0,
+    refund_method TEXT CHECK (refund_method IN ('cash','monthly_settlement','none')),
+    operator_id UUID NOT NULL,
+    manager_approval_id UUID,    -- > 500 元需店長
+    movement_id BIGINT REFERENCES stock_movements(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  ALTER TABLE customer_order_items
+    ADD COLUMN returned_qty NUMERIC(18,3) NOT NULL DEFAULT 0;
+
+  ALTER TABLE stores
+    ADD COLUMN return_policy JSONB;  -- 加盟店自訂退貨規則
+  ```
 
 ---
 
@@ -323,6 +430,19 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 | 確認取貨（POS） | ✅ | ✅ | ✅ | ✅ |
 | 處理逾期訂單 | ✅ | ✅ | ✅（本店）| ❌ |
 | 看報表 | ✅ | ✅ | ✅（本店）| ❌ |
+| **加盟店自主設定**（LINE Pay 啟用 / 員工折數 / 退貨政策 / 取貨時限覆寫）| ✅ | ⚠️ 僅建議 | ✅（本店）| ❌ |
+
+> **加盟店自主權註記**（2026-04-21 新增，呼應通知模組 Q12 加盟店模式）：
+>
+> 100 家加盟店**非直營**、總部對個別店營運細節無直接管轄權。以下項目由**各店店長（= 加盟店老闆）自行決定**，系統以 `stores.*` 欄位記錄：
+> - 是否啟用 LINE Pay（P1，見 §7.7） → `stores.allowed_payment_methods`
+> - 員工團購折數（70~80% 或不提供，見 §7.10） → `stores.employee_discount_rate`
+> - 退貨政策嚴格度（見 §7.11） → `stores.return_policy`
+> - 取貨時限覆寫（見 Q9） → `group_buy_campaigns.pickup_days` 活動層級 / 未來可開店層級
+>
+> 總部角色：**提供預設值 + 法遵底線**（例：統一發票政策 Q17 屬法遵、不得店家自訂）；其他項目**尊重店家自主**。
+>
+> RBAC 含意：此表「店長」若為加盟店老闆 → 擁有上述自主設定權；若為直營店店長（未來可能有）→ 僅限查看、實際設定歸總部。
 
 ---
 
@@ -349,8 +469,8 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 - [ ] **會員模組** ← `rpc_resolve_member`、alias 綁定；`rpc_earn_points`
 - [ ] **庫存模組** → `rpc_reserve` / `rpc_release` 鎖釋庫存；取貨時 `rpc_outbound`
 - [ ] **採購模組** → `rpc_create_pr_from_campaign`（新 RPC，v0.2）
-- [ ] **銷售模組** → 取貨時建立 `pos_sales`
-- [ ] **通知模組** → 到貨 / 取貨期限 / 逾期事件推播
+- [ ] **銷售模組** → 取貨時建立 `pos_sales`；**員工團購（§7.10）對齊 `employee_meals` 月結**；退貨（§7.11）建立 `pos_refund`
+- [ ] **通知模組** → 到貨 / 取貨期限 / 逾期事件推播；加盟店 LINE OA 模式（通知 Q12）決定通知能否送達
 - [ ] **LIFF 前端（另案）** → 顧客查訂單、取貨確認、補綁 alias
 
 ---
@@ -695,15 +815,44 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
   - 不會產生等級 / 隨機類的客訴
   - 未來若要改（例如 VIP 優先）可擴充成 score-based（`score = f(tier, time)`），但 v1 純 FIFO
 
+### 發票 / 合規
+- [ ] **Q17 發票政策**（⚠️ **未解決、上線前必須解決**）（2026-04-21 新增）
+
+  **現況**：v1 暫定**不開發票**（取貨單 / receipt 僅列品項金額）。
+
+  **法遵風險**：
+  - 依《統一發票使用辦法》，**月營業額超過 20 萬**須強制開立統一發票
+  - 團購店若達此門檻、不開發票 → 違反稅法（可能罰鍰 + 補稅）
+  - 100 家加盟店中、達到門檻的比例尚未調研
+
+  **待決策項**：
+  1. 是否所有店都改為「小規模營業人」（月營業額 ≤ 20 萬免開）→ 業態限制大
+  2. 若採「營業人統一發票」→ 需串接**財政部電子發票 API**（B2C 電子發票）
+  3. 是否由總部統一開 vs 各加盟店各自開（加盟店模式下各店獨立稅籍）
+  4. 退貨時的折讓單處理
+  5. 員工團購（§7.10）是否也需要開立（原則上不用、但要確認）
+
+  **必須完成動作**：
+  - [ ] 會計師諮詢（各店營收規模、稅籍狀態、加盟契約中的稅務分工）
+  - [ ] 若需串接電子發票 → 評估廠商（綠界 / 藍新 / 自行串）
+  - [ ] 和銷售模組 POS 結算流程對齊（§7.7 取貨結算需同步更新）
+  - [ ] 決策後回來更新本 Q17、§5 Non-Goals、§7.7
+
+  **暫時做法（v1）**：只在紙本 / 電子取貨單上列明細，**不開統一發票**。此狀態**不可上線給真實顧客**、僅限 POC / pilot 內部測試。
+
 ---
 
 ## 14. 下一步
-- [ ] 回答 Q1~Q16 → 進入 v0.2（展開 DB schema + RPC）
+- [x] 回答 Q1~Q16（2026-04-21）
+- [x] 合併 2026-04-21 session 8 個 delta（2026-04-22，本次 update）
+- [ ] **Q17 發票政策**（⚠️ 上線前必決）→ 會計師諮詢 + 電子發票廠商評估
+- [ ] 進入 v0.2（展開 DB schema + RPC）
 - [ ] 建 `docs/DB-訂單取貨模組.md`
 - [ ] 建 `docs/sql/order_schema.sql`
 - [ ] Spike：Claude Haiku vision 解析準確率（POC）
 - [ ] Spike：campaign_cap 併發扣除正確性（5 人同時登打）
 - [ ] 與會員模組整合：alias 綁定流程 UX
+- [ ] 和銷售模組對齊：`employee_meals` 月結 + `pos_refund` 退款
 
 ---
 
@@ -721,11 +870,32 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF]
 
 ## 本 PRD 已吸收的既有決策（跨模組）
 
-- **業態**：團購店、20 LINE 社群頻道 × 300~2000 顧客 / 頻道
+- **業態**：團購店**加盟連鎖（100 店，非直營）**、20 LINE 社群頻道 × 300~2000 顧客 / 頻道、婆婆媽媽客群
 - **LINE 社群無 API**：半自動發文 / 截圖解析
 - **雙加架構**：顧客加社群 + OA，訂單模組負責 alias 綁定
+- **加盟店模式**（2026-04-21 新增，呼應通知 Q12）：
+  - 每店自主 LINE OA（通知模組 full/simple/none 三模式）
+  - 每店自主付款方式（v1 僅 cash、P1 開放 LINE Pay）
+  - 每店自主員工折數、退貨政策
+  - 總部提供預設 + 法遵底線，其餘尊重店家自主
 - **預留庫存**：下單即 reserve（庫存 Q7）
 - **解析分階段**：v1 人工 / P1 Claude vision / P2 OCR（採購 Q3）
-- **POS 結算**：v1 只收現金（銷售 Q6）
+- **POS 結算**：v1 只收現金（銷售 Q6 + 本模組 §7.7）
+- **員工團購**：走員工價 + `employee_meals` 月結（本模組 §7.10 對齊銷售）
 - **會員等級**：4 級 + 點數 1% + 等級倍率（會員 Q5）
 - **稽核**：所有表帶四欄位 created_by / updated_by / created_at / updated_at
+
+---
+
+## 變更歷史（Changelog）
+
+- **2026-04-21** v0.1：Q1~Q16 初版完成，commit `d00abab`
+- **2026-04-22** v0.1.1：合併 8 個 delta
+  - Delta 1：顧客暱稱格式規則 `{姓名}-{手機後6碼}-{取貨店}`（§2, §7.3）
+  - Delta 2：v1 不開發票 + 新增 Q17（Open，⚠️ 法遵風險）（§5, §13）
+  - Delta 3：v1 全面只收現金、`stores.allowed_payment_methods` 預留未來（§5, §7.7）
+  - Delta 4：員工團購走員工價 + 月結對齊 `employee_meals`（§7.10 新增）
+  - Delta 5：退貨流程 + 退貨倉/瑕疵品倉（§7.11 新增）
+  - Delta 6：結團類型 常規/快速/限量團（§2）
+  - Delta 7：社群 vs 門市 N:N 已支援、僅確認
+  - Delta 8：§9 RBAC 加入加盟店自主權註記
