@@ -13,6 +13,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "pg": "^8.20.0",
     "pg-query-emscripten": "^5.1.0"
   }
 }
