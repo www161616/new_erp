@@ -4,8 +4,8 @@ module: Order
 status: draft-v0.1.1
 owner: alex.chen
 created: 2026-04-21
-updated: 2026-04-22
-tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
+updated: 2026-04-23
+tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店, c混合型]
 ---
 
 # PRD — 訂單 / 取貨模組（Order / Pickup Module）
@@ -16,6 +16,7 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
 > 本文件為 **v0.1 checklist 版**。
 >
 > **v0.2 增補**：見 [[PRD-訂單取貨模組-v0.2-addendum]]（開團總表 matrix / 揀貨波次 / cutoff_date / 未到貨積壓 / 樂樂 CSV）。
+> **決策基準**：[[decisions/2026-04-23-系統立場-混合型]] C 混合型 — 本模組 `stores.allowed_payment_methods` / `stores.employee_discount_rate` / §13 Q17 per-store 發票模式皆依此立場。
 
 ---
 
