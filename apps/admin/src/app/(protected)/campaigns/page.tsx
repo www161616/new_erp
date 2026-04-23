@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { Modal } from "@/components/Modal";
+import { CampaignForm, type CampaignFormValues } from "@/components/CampaignForm";
 
 type Status =
   | "draft" | "open" | "closed" | "ordered" | "receiving" | "ready" | "completed" | "cancelled";
@@ -37,6 +39,8 @@ export default function CampaignsListPage() {
   const [page, setPage] = useState(1);
 
   const [itemCounts, setItemCounts] = useState<Map<number, number>>(new Map());
+  const [modalOpen, setModalOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     const t = setTimeout(() => { setQuery(queryDraft); setPage(1); }, 250);
@@ -85,7 +89,7 @@ export default function CampaignsListPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [query, status, page]);
+  }, [query, status, page, reloadTick]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const fromIdx = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -100,9 +104,9 @@ export default function CampaignsListPage() {
             {loading ? "載入中…" : total === 0 ? "共 0 筆" : `共 ${total} 筆（${fromIdx}-${toIdx}）`}
           </p>
         </div>
-        <Link href="/campaigns/new" className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200">
+        <button onClick={() => setModalOpen(true)} className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200">
           新增開團
-        </Link>
+        </button>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -156,6 +160,15 @@ export default function CampaignsListPage() {
           </tbody>
         </table>
       </div>
+
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="新增開團">
+        {modalOpen && (
+          <CampaignForm
+            onSaved={(id) => { setModalOpen(false); setReloadTick((t) => t + 1); window.location.href = `/campaigns/edit?id=${id}&saved=1`; }}
+            onCancel={() => setModalOpen(false)}
+          />
+        )}
+      </Modal>
 
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2 text-sm">

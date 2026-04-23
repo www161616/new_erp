@@ -38,7 +38,15 @@ export const emptyMemberValues: MemberFormValues = {
   notes: null,
 };
 
-export function MemberForm({ initial }: { initial?: MemberFormValues }) {
+export function MemberForm({
+  initial,
+  onSaved,
+  onCancel,
+}: {
+  initial?: MemberFormValues;
+  onSaved?: (id: number) => void;
+  onCancel?: () => void;
+}) {
   const router = useRouter();
   const [v, setV] = useState<MemberFormValues>(initial ?? emptyMemberValues);
   const [tiers, setTiers] = useState<Tier[]>([]);
@@ -90,7 +98,8 @@ export function MemberForm({ initial }: { initial?: MemberFormValues }) {
       });
       if (err) throw err;
       const newId = Number(data);
-      router.replace(`/members/edit?id=${newId}&saved=1`);
+      if (onSaved) onSaved(newId);
+      else router.replace(`/members/detail?id=${newId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -214,7 +223,7 @@ export function MemberForm({ initial }: { initial?: MemberFormValues }) {
         </button>
         <button
           type="button"
-          onClick={() => router.push("/members")}
+          onClick={() => onCancel ? onCancel() : router.push("/members")}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           取消
