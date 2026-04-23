@@ -49,7 +49,15 @@ const STATUS_OPT: { v: CampaignStatus; label: string }[] = [
   { v: "cancelled", label: "已取消" },
 ];
 
-export function CampaignForm({ initial }: { initial?: CampaignFormValues }) {
+export function CampaignForm({
+  initial,
+  onSaved,
+  onCancel,
+}: {
+  initial?: CampaignFormValues;
+  onSaved?: (id: number) => void;
+  onCancel?: () => void;
+}) {
   const router = useRouter();
   const [v, setV] = useState<CampaignFormValues>(initial ?? emptyCampaignValues);
   const [saving, setSaving] = useState(false);
@@ -79,7 +87,9 @@ export function CampaignForm({ initial }: { initial?: CampaignFormValues }) {
         p_notes: v.notes,
       });
       if (err) throw err;
-      router.replace(`/campaigns/edit?id=${Number(data)}&saved=1`);
+      const newId = Number(data);
+      if (onSaved) onSaved(newId);
+      else router.replace(`/campaigns/edit?id=${newId}&saved=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -144,7 +154,7 @@ export function CampaignForm({ initial }: { initial?: CampaignFormValues }) {
         <button type="submit" disabled={saving} className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200">
           {saving ? "儲存中…" : v.id ? "儲存" : "建立開團"}
         </button>
-        <button type="button" onClick={() => router.push("/campaigns")} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">取消</button>
+        <button type="button" onClick={() => onCancel ? onCancel() : router.push("/campaigns")} className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">取消</button>
       </div>
     </form>
   );

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { Modal } from "@/components/Modal";
+import { MemberForm, type MemberFormValues } from "@/components/MemberForm";
 
 type Status = "active" | "inactive" | "blocked" | "merged" | "deleted";
 type SortKey = "updated_at" | "member_no" | "name";
@@ -40,12 +42,16 @@ export default function MembersListPage() {
   const [query, setQuery] = useState("");
   const [tierId, setTierId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
+  const [storeId, setStoreId] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
 
   const [tiers, setTiers] = useState<Tier[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
   const [balances, setBalances] = useState<Map<number, { points: number; wallet: number }>>(new Map());
+  const [reloadTick, setReloadTick] = useState(0);
+  const [modal, setModal] = useState<{ mode: "new" } | { mode: "edit"; values: MemberFormValues } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -57,15 +63,16 @@ export default function MembersListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [tierId, status, sortBy, sortDir]);
+  }, [tierId, status, storeId, sortBy, sortDir]);
 
   useEffect(() => {
     (async () => {
-      const { data } = await getSupabase()
-        .from("member_tiers")
-        .select("id, code, name")
-        .order("sort_order");
-      if (data) setTiers(data as Tier[]);
+      const [t, s] = await Promise.all([
+        getSupabase().from("member_tiers").select("id, code, name").order("sort_order"),
+        getSupabase().from("stores").select("id, code, name").eq("is_active", true).order("name"),
+      ]);
+      if (t.data) setTiers(t.data as Tier[]);
+      if (s.data) setStores(s.data as Store[]);
     })();
   }, []);
 
@@ -86,6 +93,7 @@ export default function MembersListPage() {
         }
         if (tierId) q = q.eq("tier_id", Number(tierId));
         if (status) q = q.eq("status", status);
+        if (storeId) q = q.eq("home_store_id", Number(storeId));
 
         const { data, count, error } = await q;
         if (cancelled) return;
@@ -126,7 +134,7 @@ export default function MembersListPage() {
     return () => {
       cancelled = true;
     };
-  }, [query, tierId, status, sortBy, sortDir, page]);
+  }, [query, tierId, status, storeId, sortBy, sortDir, page, reloadTick]);
 
   const tierMap = useMemo(() => new Map(tiers.map((t) => [t.id, t])), [tiers]);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -150,15 +158,15 @@ export default function MembersListPage() {
             {loading ? "載入中…" : total === 0 ? "共 0 筆" : `共 ${total} 筆（顯示 ${fromIdx}-${toIdx}）`}
           </p>
         </div>
-        <Link
-          href="/members/new"
+        <button
+          onClick={() => setModal({ mode: "new" })}
           className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
           新增會員
-        </Link>
+        </button>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <input
           type="search"
           placeholder="搜尋 會員編號 / 姓名 / 手機"
@@ -188,6 +196,18 @@ export default function MembersListPage() {
           <option value="inactive">停用</option>
           <option value="blocked">封鎖</option>
         </select>
+        <select
+          value={storeId}
+          onChange={(e) => setStoreId(e.target.value)}
+          className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+        >
+          <option value="">全部門市</option>
+          {stores.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.code})
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && (
@@ -209,14 +229,15 @@ export default function MembersListPage() {
               <Th className="text-right">儲值</Th>
               <Th>狀態</Th>
               <ThSort label="更新" col="updated_at" sortBy={sortBy} sortDir={sortDir} onToggle={toggleSort} align="right" />
+              <Th>{""}</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {rows === null ? (
-              <SkeletonRows cols={8} />
+              <SkeletonRows cols={9} />
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-sm text-zinc-500">
+                <td colSpan={9} className="p-6 text-center text-sm text-zinc-500">
                   {total === 0 && !query && !tierId && !status
                     ? "還沒有會員，按「新增會員」開始建立。"
                     : "沒有符合條件的會員。"}
@@ -245,6 +266,25 @@ export default function MembersListPage() {
                     <Td className="text-right text-zinc-500">
                       {new Date(r.updated_at).toLocaleString("zh-TW")}
                     </Td>
+                    <Td>
+                      <button
+                        onClick={async () => {
+                          const { data } = await getSupabase()
+                            .from("members")
+                            .select("id, member_no, phone, name, gender, birthday, email, tier_id, home_store_id, status, notes")
+                            .eq("id", r.id).maybeSingle();
+                          if (data) setModal({ mode: "edit", values: {
+                            id: data.id, member_no: data.member_no, phone: data.phone ?? "",
+                            name: data.name ?? "", gender: data.gender, birthday: data.birthday,
+                            email: data.email, tier_id: data.tier_id, home_store_id: data.home_store_id,
+                            status: data.status, notes: data.notes,
+                          }});
+                        }}
+                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        編輯
+                      </button>
+                    </Td>
                   </tr>
                 );
               })
@@ -252,6 +292,20 @@ export default function MembersListPage() {
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        title={modal?.mode === "edit" ? `編輯會員 #${modal.values.member_no}` : "新增會員"}
+      >
+        {modal && (
+          <MemberForm
+            initial={modal.mode === "edit" ? modal.values : undefined}
+            onSaved={() => { setModal(null); setReloadTick((t) => t + 1); }}
+            onCancel={() => setModal(null)}
+          />
+        )}
+      </Modal>
 
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2 text-sm">
