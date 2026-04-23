@@ -7,15 +7,14 @@ type Row = {
   id: number;
   sku_id: number;
   sku_code: string;
-  product_name: string | null;
-  variant_name: string | null;
+  sku_name: string;
   unit_price: number;
   cap_qty: number | null;
   sort_order: number;
   notes: string | null;
 };
 
-type SkuOption = { id: number; sku_code: string; product_name: string | null; variant_name: string | null };
+type SkuOption = { id: number; sku_code: string; name: string };
 
 export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -27,7 +26,7 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
   const reload = async () => {
     const { data, error: err } = await getSupabase()
       .from("campaign_items")
-      .select("id, sku_id, unit_price, cap_qty, sort_order, notes, skus!inner(id, sku_code, product_name, variant_name)")
+      .select("id, sku_id, unit_price, cap_qty, sort_order, notes, skus!inner(id, sku_code, name)")
       .eq("campaign_id", campaignId)
       .order("sort_order");
     if (err) { setError(err.message); return; }
@@ -35,10 +34,9 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
       (data as unknown as Array<{
         id: number; sku_id: number; unit_price: number; cap_qty: number | null;
         sort_order: number; notes: string | null;
-        skus: { id: number; sku_code: string; product_name: string | null; variant_name: string | null };
+        skus: { id: number; sku_code: string; name: string };
       }>).map((r) => ({
-        id: r.id, sku_id: r.sku_id, sku_code: r.skus.sku_code,
-        product_name: r.skus.product_name, variant_name: r.skus.variant_name,
+        id: r.id, sku_id: r.sku_id, sku_code: r.skus.sku_code, sku_name: r.skus.name,
         unit_price: Number(r.unit_price), cap_qty: r.cap_qty != null ? Number(r.cap_qty) : null,
         sort_order: r.sort_order, notes: r.notes,
       }))
@@ -48,20 +46,15 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
   useEffect(() => { reload(); }, [campaignId]);
 
   useEffect(() => {
+    if (!skuQuery.trim()) { setSkuResults([]); return; }
     const t = setTimeout(async () => {
-      let q = getSupabase()
-        .from("skus").select("id, sku_code, product_name, variant_name")
-        .eq("status", "active")
-        .order("updated_at", { ascending: false })
-        .limit(20);
-      const s = skuQuery.trim();
-      if (s) {
-        const safe = s.replace(/[%,()]/g, " ").trim();
-        q = q.or(`sku_code.ilike.%${safe}%,product_name.ilike.%${safe}%,variant_name.ilike.%${safe}%`);
-      }
-      const { data } = await q;
+      const safe = skuQuery.replace(/[%,()]/g, " ").trim();
+      const { data } = await getSupabase()
+        .from("skus").select("id, sku_code, name")
+        .or(`sku_code.ilike.%${safe}%,name.ilike.%${safe}%`)
+        .limit(10);
       setSkuResults((data as SkuOption[]) ?? []);
-    }, skuQuery ? 250 : 0);
+    }, 250);
     return () => clearTimeout(t);
   }, [skuQuery]);
 
@@ -126,10 +119,7 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
             ) : rows.map((r) => (
               <tr key={r.id}>
                 <Td className="font-mono">{r.sku_code}</Td>
-                <Td>
-                  <div>{r.product_name ?? "—"}</div>
-                  {r.variant_name && <div className="text-xs text-zinc-500">{r.variant_name}</div>}
-                </Td>
+                <Td>{r.sku_name}</Td>
                 <Td className="text-right">
                   <input
                     type="number" step="0.0001" defaultValue={r.unit_price}
@@ -159,13 +149,8 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
             />
           </div>
         </div>
-        {skuResults.length === 0 && !adding && (
-          <div className="mt-2 rounded-md border border-dashed border-zinc-300 p-3 text-center text-xs text-zinc-500 dark:border-zinc-700">
-            尚無 SKU。先去 <a href="/products" className="underline">商品</a> 頁建 SKU
-          </div>
-        )}
         {skuResults.length > 0 && !adding && (
-          <ul className="mt-2 max-h-72 divide-y divide-zinc-200 overflow-y-auto rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+          <ul className="mt-2 divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
             {skuResults.map((s) => (
               <li key={s.id}>
                 <button
@@ -174,10 +159,7 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
                   className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
                 >
                   <span className="font-mono">{s.sku_code}</span>
-                  <span className="text-zinc-600 dark:text-zinc-400">
-                    {s.product_name ?? "—"}
-                    {s.variant_name ? ` · ${s.variant_name}` : ""}
-                  </span>
+                  <span className="text-zinc-600 dark:text-zinc-400">{s.name}</span>
                 </button>
               </li>
             ))}
@@ -188,10 +170,7 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
             <div className="text-sm">
               <div className="text-xs text-zinc-500">已選 SKU</div>
               <div className="font-mono">{adding.sku.sku_code}</div>
-              <div className="text-xs text-zinc-600 dark:text-zinc-400">
-                {adding.sku.product_name ?? "—"}
-                {adding.sku.variant_name ? ` · ${adding.sku.variant_name}` : ""}
-              </div>
+              <div className="text-xs text-zinc-600 dark:text-zinc-400">{adding.sku.name}</div>
             </div>
             <label className="text-sm">
               <div className="text-xs text-zinc-500">單價</div>
