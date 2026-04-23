@@ -1,10 +1,10 @@
 ---
 title: PRD - 採購模組 v0.2 Addendum
 module: Purchase
-status: draft-v0.2
+status: v0.2-qclosed
 owner: alex.chen
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
 base: PRD-採購模組.md (v0.1)
 tags: [PRD, ERP, v0.2, addendum, 採購, lt-erp-integration, pending-review, import-land-goods]
 ---
@@ -378,11 +378,11 @@ admin 在 new_erp → 待匯入 tab →
 
 ## 8. Open Questions
 
-- [ ] **PR 審核的通知**：目前靠 admin 主動到 tab 看；是否該加「pending 超過 24h → LINE 通知 approver」（通知模組 v0.2 hook）
+- [x] **PR 審核的通知**（2026-04-23 closed）→ **pending 超過 24h 自動 LINE 通知 approver 一次**（不重複 nagging）。新增通知類型 → 通知模組 v0.3 hook。
 - [x] ~~**陸貨 supplier 識別**~~：Flag 11 A — v0.1 無此欄位、本 addendum §2.3 補 `suppliers.is_overseas`
-- [ ] **`purchase_approval_thresholds` scope precedence 是否需要 UI**：目前 RPC 硬編 `supplier > category > store > global`；若 pilot 要調整 → 加 `priority INT` 欄位
-- [ ] **marketplace import 的錯誤處理**：parsed_sku_id IS NULL 的 rows 是否有 auto-suggest 機制（bigm model 查過歷史 supplier_sku_code）— 留 P1
-- [ ] **1688 / 拼多多 API 憑證**：存在哪（Supabase Vault / 環境變數 / Apps Script PropertiesService）— 在 PRD #4 統一定
+- [x] **`purchase_approval_thresholds` scope precedence 是否需要 UI**（2026-04-23 closed）→ **不做 UI**；RPC 硬編 `supplier > category > store > global`；pilot 反饋需調整再加 `priority INT` 欄位。
+- [x] **marketplace import 的錯誤處理**（2026-04-23 closed）→ **defer P1**；v1 parsed_sku_id IS NULL 的 rows 由 user 手動對應（UI 上提供「待對應」清單）。未來資料量夠才考慮 ML auto-suggest。
+- [x] **1688 / 拼多多 API 憑證**（2026-04-23 closed）→ **不存憑證、不串 API**；改由採購人員**手動下載 CSV 後上傳** new_erp（類樂樂 CSV 流程）。省 Vault 設定、避免 scraping 法遵灰區、避免帳密外洩風險。見 [[PRD-供應商整合-v0.2]] §10 Q4 配套決議。
 
 ---
 

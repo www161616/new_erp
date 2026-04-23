@@ -4,8 +4,8 @@ module: Order
 status: draft-v0.1.1
 owner: alex.chen
 created: 2026-04-21
-updated: 2026-04-22
-tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
+updated: 2026-04-23
+tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店, c混合型, 記事本按讚式]
 ---
 
 # PRD — 訂單 / 取貨模組（Order / Pickup Module）
@@ -16,6 +16,7 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
 > 本文件為 **v0.1 checklist 版**。
 >
 > **v0.2 增補**：見 [[PRD-訂單取貨模組-v0.2-addendum]]（開團總表 matrix / 揀貨波次 / cutoff_date / 未到貨積壓 / 樂樂 CSV）。
+> **決策基準**：[[decisions/2026-04-23-系統立場-混合型]] C 混合型 — 本模組 `stores.allowed_payment_methods` / `stores.employee_discount_rate` / §13 Q17 per-store 發票模式皆依此立場。
 
 ---
 
@@ -134,7 +135,7 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
 - [ ] ❌ **訂單拆單 / 合單**（v1 一筆顧客訂單對應一筆取貨）
 - [ ] ❌ **預付定金**（v1 取貨才付款）
 - [ ] ❌ **LINE Pay 等行動支付**（銷售 Q9 已排除 v1；架構上 `stores.allowed_payment_methods` 已預留、但 v1 各店實際可選值只有 `cash`；P1 再開放各加盟店自主啟用 LINE Pay）
-- [ ] ❌ **開立統一發票**（v1 暫不開 ⚠️ **法遵風險**，見 §13 Q17；上線前必須由會計師確認）
+- [ ] 🟡 **開立統一發票**（2026-04-23 部分解 — per-store 模式，見 §7.12；模式 `none` 店仍不開、需監控門檻；模式 `enabled` 店走 ezPay 電子發票；Q17 尚待 ezPay 業務與會計師雙軌確認）
 
 ---
 
@@ -202,7 +203,14 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
 
 ### 7.3 訂單登打（Order Entry）— v1 核心
 
+> **⚠️ 業務事實（2026-04-23 使用者確認，記憶 `project_new_erp_line_order_reality.md`）**：
+> - 顧客下單都在 **LINE 記事本**（Notes / 置頂貼文）、**不在一般聊天訊息**
+> - 下單方式 = **按讚** → 預設 qty=1
+> - 需要 >1 份的顧客會在記事本下方**留言**寫數量
+> - **推翻原本「+N 留言解析」假設**（聊天訊息裡根本沒有人喊單）
+
 - [ ] **v1 路徑（純人工）**：
+  - 小幫手打開對應 LINE 社群的**記事本貼文**、對照按讚名單 + 留言
   - 進入「活動 → 登打」介面
   - 介面分區：
     - 頂部：活動資訊 + 本次商品清單（可拖放加入訂單）
@@ -219,14 +227,39 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
     - 新暱稱 → 提示「新綁定」→ 輸入手機 → 系統建 member + alias
     - **暱稱格式提示**（2026-04-21）：若顧客暱稱非 `{姓名}-{手機後6碼}-{取貨店}` 標準格式、UI 顯示 soft warning 提醒小幫手請顧客補齊（尤其多對多社群必含取貨店）
   - Draft 自動存檔（30s）
-- [ ] **P1 路徑（截圖解析）**：
-  - 上傳 1 或多張 LINE 頻道截圖
-  - 系統呼叫 Claude Haiku vision（附上本活動 SKU 清單 + prompt）
-  - 回傳 JSON：`[{nickname, orders: [{sku_id, qty, action}]}]`
-  - 填入上述登打表格草稿
-  - 小幫手審核 / 修改 / 送出
-  - 儲存截圖 + LLM 原始輸出（`source_screenshots[]`, `source_parsed_json`）
+- [ ] **P1 路徑（截圖解析 — 兩段式）**：
+
+  **A. 按讚名單解析**（主要流量，[spike issue #104](https://github.com/www161616/new_erp/issues/104)）
+  - 上傳 1 張 **LINE 記事本按讚列表截圖**
+  - 系統呼叫 Claude Haiku vision（附活動 context + prompt）
+  - 回傳 JSON：
+    ```json
+    [
+      {"raw_nickname": "Janett8252228456中和環峰",
+       "parsed_name": "Janett",
+       "parsed_phone_hint": "8252228456",
+       "parsed_store_hint": "中和環峰",
+       "default_qty": 1,
+       "reaction_time": "相對時間（如 26 秒讚過）"}
+    ]
+    ```
+  - 系統**預填** `customer_orders` 草稿（qty=1、等小幫手人工確認）
+  - AutoMatch 到既有 `members` / `store`；無法 match 時跳 new customer 流程
+
+  **B. 留言數量補充**（有 qty > 1 的顧客，次要）
+  - 若某位顧客需要 qty > 1、他會在記事本留言（例「我要 3 份」）
+  - 小幫手看到後：
+    - v1 / P1：手動改 qty（省時、多數情況）
+    - P2：第二段 vision 解析留言文字 → 自動 match 回 A 的暱稱 → 更新 qty
+
+  **儲存來源證據**：`source_screenshots[]`（按讚圖 + 留言圖）、`source_parsed_json`、`manual_overrides[]`（記錄小幫手哪些欄位有改）
+
 - [ ] 登打完成：批次建 `customer_orders` + `customer_order_items` + 呼叫 `rpc_reserve`
+
+- [ ] **明確反模式**（2026-04-23 POC 確認、不要做）：
+  - ❌ 解析 LINE **一般聊天訊息**找「+N」留言 — 聊天裡沒人喊單、資料量 0
+  - ❌ 自動推測數量（從按讚 + emoji 反應之類猜）— 按讚本身無數量資訊、用 qty=1 預設 + 人工補就好
+  - ❌ 商品**實物照**辨識 — 70~80% 商品無標籤、ROI 低、見 `memory/project_new_erp_product_reality.md`
 
 ### 7.4 顧客身份對應（Customer Line Aliases）
 
@@ -288,7 +321,7 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
     - 架構上 `stores.allowed_payment_methods JSONB` 欄位已預留（為 P1 LINE Pay 鋪路）
     - **v1 各店實際可選值只有 `['cash']`**、系統 enforce（不允許店家自行加 LINE Pay）
     - P1 再開放各加盟店勾選是否啟用 LINE Pay（per-store 自主，延續加盟店自主權）
-    - 發票處理：見 §13 Q17（v1 暫不開、上線前必決）
+    - 發票處理：見 **§7.12 per-store 發票模式**（`enabled` 走 ezPay API、`manual` 紙本、`none` 不開）
 - [ ] **逾期未取**：
   - 超過取貨期限未取 → `order.status = expired`
   - 釋放 reserved 庫存
@@ -340,6 +373,53 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
   ALTER TABLE stores
     ADD COLUMN employee_discount_rate NUMERIC(3,2);  -- NULL = 沿用 tenant default
   ```
+
+### 7.12 發票處理（Per-store Invoice Mode）（2026-04-23 新增）
+
+> **策略來源**：Q17 部分解（2026-04-23）— 廠商走 **ezPay 老客戶擴容**（不換綠界）、模式 per-store（符合 C 混合型）。
+> **相關 schema**：`stores.invoice_mode` / `stores.tax_id` / `stores.ezpay_sub_merchant_id` / `stores.monthly_revenue_threshold_cents`（見 migration `20260424130000_v02_q_closure_delta.sql` §7）。
+
+#### 三種 per-store 發票模式
+
+| 模式 | 意思 | 適用 | 結帳時行為 |
+|---|---|---|---|
+| `enabled` | 電子發票（ezPay 子商店）| 營業額 > 20 萬、或加盟主主動啟用 | 結帳 RPC 呼叫 ezPay API 開立 → 回傳發票號碼 → 寫入 `customer_orders.invoice_no` |
+| `manual` | 手動紙本 / 發票機 | 規模中等、還不想走電子 | 結帳 UI 提示店員「本店用紙本、請另開發票」→ 不呼叫 API |
+| `none` | 合法免開（預設） | 月營業額 < 20 萬 | 結帳完成、不提示、不開發票 |
+
+#### 模式切換（加盟主自助）
+
+- **誰能切**：該店加盟主（`store_manager` role）、不需總部審核（符合 C 混合型「看得到 ≠ 管得到」）
+- **切 `none` → `enabled`**：
+  1. 後台「發票設定」頁點擊「啟用電子發票」
+  2. 系統呼叫 **ezPay 主帳號 API** on-demand 開通子商店
+  3. 子商店 ID 回填 `stores.ezpay_sub_merchant_id`
+  4. 發票模式更新為 `enabled`
+  5. ⚠️ 需先填 `stores.tax_id`（統編）才能切換
+- **切 `enabled` → `manual/none`**：加盟主自行決定，但**已開出的發票不回溯**；切換後新訂單才走新模式
+- **總部可視**：admin role 能看所有店 `invoice_mode` 分佈（彙總報表 + 每店狀態）
+
+#### 月營業額門檻監控（法遵安全網）
+
+- 每日批次：計算每店**當月累計營業額**（`SUM(customer_orders.total_amount) WHERE ordered_at 在當月`）
+- 達到 `stores.monthly_revenue_threshold_cents × 0.8`（預設 16 萬）→ 觸發 **`invoice_threshold_warning`** 通知（見 [[PRD-通知模組]] §6.1）
+- 達到 100% 仍停留在 `none` → **每週提醒**加盟主 + **標記法遵風險**（admin dashboard 紅點）
+- 決策權仍在加盟主、系統**不強制切換**（符合 C 混合型加盟店自主）
+
+#### 員工團購（§7.10）發票處理
+
+- 員工價 + 月結機制已存在
+- 走 `enabled` 的店：**月底一張彙總發票**（而非每次開立）— 需 ezPay 支援「彙總開立」（業務確認中）
+- 走 `manual/none` 的店：人資部門月結 + 薪資扣款時紙本收據
+- 待決：會計師諮詢「員工折扣是否實物福利、需列薪資」
+
+#### 退貨折讓（§7.11）對接
+
+- `enabled` 模式：取消發票 → ezPay API `rpc_void_invoice` / 折讓 → `rpc_issue_allowance`
+- `manual` 模式：店員開紙本折讓單
+- `none` 模式：原訂單 = 收款否？依原結帳 method 退款（§7.11 既有邏輯）
+
+---
 
 ### 7.11 退貨流程（Returns）（2026-04-21 新增）
 
@@ -818,40 +898,44 @@ tags: [PRD, ERP, 訂單, 取貨, Order, Pickup, LINE社群, LIFF, 加盟店]
   - 未來若要改（例如 VIP 優先）可擴充成 score-based（`score = f(tier, time)`），但 v1 純 FIFO
 
 ### 發票 / 合規
-- [ ] **Q17 發票政策**（⚠️ **未解決、上線前必須解決**）（2026-04-21 新增）
+- [🟡] **Q17 發票政策**（2026-04-23 部分解 — 等 ezPay 業務 + 會計師確認後收 closed）
 
-  **現況**：v1 暫定**不開發票**（取貨單 / receipt 僅列品項金額）。
+  **現況（2026-04-23 session 決定）**：
+  - 📁 廠商策略文件：[[Q17-電子發票廠商比較]] + [[Q17-會計師諮詢清單]]
+  - 📁 決策基準：[[decisions/2026-04-23-系統立場-混合型]] C 混合型
+  - 📁 本模組落地：§7.12 per-store 發票模式（`enabled` / `manual` / `none`）
 
-  **法遵風險**：
-  - 依《統一發票使用辦法》，**月營業額超過 20 萬**須強制開立統一發票
-  - 團購店若達此門檻、不開發票 → 違反稅法（可能罰鍰 + 補稅）
-  - 100 家加盟店中、達到門檻的比例尚未調研
+  **已決定的部分**：
+  1. **廠商 = ezPay 老客戶擴容**（不換綠界；總部已是 3 年 ezPay 客戶）
+  2. **架構 = per-store 模式**（加盟主自主切換，符合 C 混合型）
+  3. **schema 已落地**：`stores.invoice_mode` + `tax_id` + `ezpay_sub_merchant_id` + `monthly_revenue_threshold_cents`（migration `2f6f1f7`）
+  4. **開通方式 = on-demand**：加盟主切到 `enabled` 時、系統呼叫 ezPay API 建立子商店（不預先簽 100 個）
+  5. **門檻監控**：月營業額 > 16 萬（80% × 20 萬）觸發通知、提醒加盟主考慮切 `enabled`
+  6. **v1 預設 = `none`**（合法免開，各店自己決定何時啟用）
 
-  **待決策項**：
-  1. 是否所有店都改為「小規模營業人」（月營業額 ≤ 20 萬免開）→ 業態限制大
-  2. 若採「營業人統一發票」→ 需串接**財政部電子發票 API**（B2C 電子發票）
-  3. 是否由總部統一開 vs 各加盟店各自開（加盟店模式下各店獨立稅籍）
-  4. 退貨時的折讓單處理
-  5. 員工團購（§7.10）是否也需要開立（原則上不用、但要確認）
+  **仍待確認（才能完全 close）**：
+  - [ ] **ezPay 業務**：主帳號 + 子商店架構 / 老客戶擴容折扣 / 計費時機 / 單店方案張數上限層級（見 `Q17-ezPay電話備忘.md`）
+  - [ ] **會計師**：加盟店獨立稅籍分工 / 員工團購發票 / 退貨折讓單 / 過渡期法律風險（見 `Q17-會計師諮詢清單.md`）
+  - [ ] **對接銷售模組** POS 結算流程（§7.7）— 確認 `customer_orders` 結帳時的發票 hook 呼叫點
+  - [ ] **員工團購發票**：彙總月結單張 vs 每次 — 視會計師意見決定
 
-  **必須完成動作**：
-  - [ ] 會計師諮詢（各店營收規模、稅籍狀態、加盟契約中的稅務分工）
-  - [ ] 若需串接電子發票 → 評估廠商（綠界 / 藍新 / 自行串）
-  - [ ] 和銷售模組 POS 結算流程對齊（§7.7 取貨結算需同步更新）
-  - [ ] 決策後回來更新本 Q17、§5 Non-Goals、§7.7
-
-  **暫時做法（v1）**：只在紙本 / 電子取貨單上列明細，**不開統一發票**。此狀態**不可上線給真實顧客**、僅限 POC / pilot 內部測試。
+  **與過去版本的變更**：
+  - ~~v1 不開發票~~ → v1 per-store 模式、各店自主決定；`none` 店仍不開但**有法遵監控**、不會失控
 
 ---
 
 ## 14. 下一步
 - [x] 回答 Q1~Q16（2026-04-21）
 - [x] 合併 2026-04-21 session 8 個 delta（2026-04-22，本次 update）
-- [ ] **Q17 發票政策**（⚠️ 上線前必決）→ 會計師諮詢 + 電子發票廠商評估
+- [🟡] **Q17 發票政策**（部分解 2026-04-23；待 ezPay 業務 + 會計師雙軌確認後收 closed）
 - [ ] 進入 v0.2（展開 DB schema + RPC）
 - [ ] 建 `docs/DB-訂單取貨模組.md`
 - [ ] 建 `docs/sql/order_schema.sql`
-- [ ] Spike：Claude Haiku vision 解析準確率（POC）
+- [ ] ~~Spike：Claude Haiku vision 解析準確率（POC）~~ → **2026-04-23 拆為 3 個具體 spike**：
+  - [ ] [#104](https://github.com/www161616/new_erp/issues/104) AI vision — LINE 記事本按讚名單解析（訂單登打）
+  - [ ] [#102](https://github.com/www161616/new_erp/issues/102) AI vision — 團購記事本貼文解析（每天 21-30 篇 campaign）
+  - [ ] [#103](https://github.com/www161616/new_erp/issues/103) AI vision — 1688/拼多多商品頁解析（陸貨建檔）
+  - POC 報告：[[POC-2026-04-23-vision-reality-check]]
 - [ ] Spike：campaign_cap 併發扣除正確性（5 人同時登打）
 - [ ] 與會員模組整合：alias 綁定流程 UX
 - [ ] 和銷售模組對齊：`employee_meals` 月結 + `pos_refund` 退款

@@ -1,10 +1,10 @@
 ---
 title: PRD - 供應商整合（Google Sheets + Marketplace）
 module: SupplierIntegration
-status: draft-v0.2
+status: v0.2-qclosed
 owner: alex.chen
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
 tags: [PRD, ERP, v0.2, 供應商, 整合, Apps-Script, xiaolan, Google-Sheets, 1688, 拼多多]
 ---
 
@@ -370,11 +370,11 @@ admin 到 new_erp → 待匯入 tab → SKU match → rpc_resolve_external_purch
 
 ## 10. Open Questions
 
-- [ ] **Sheets tab 變動**：若小蘭改 tab 名稱 / 欄位順序 → `xiaolan_settings.sheet_tabs` 需要同步更新；目前靠 admin 手動改 config、沒做 schema diff 偵測
-- [ ] **xiaolan 歷史資料 import**：lt-erp 已有歷史 shared_kv 資料、要不要一次性 import 進 new xiaolan_*？建議不 import（以 pilot cutoff 為界）、但需 user 確認
-- [ ] **`_shared/SupabaseClient.gs` 是否封裝**：目前每個子 script 各自寫 HTTP helper；未來想封裝成共用 lib → 但 Apps Script 子專案共享需 `Library` 模式（略複雜）
-- [ ] **1688 / 拼多多 API 是否真的有 open API**：部分 marketplace 需 scraping（法遵灰區）— 確認後決定 Apps Script 或手動匯入 CSV
-- [ ] **Apps Script quota**：每帳號每天 UrlFetchApp 20000 次限制；若供應商資料量爆大需分攤到多 Google 帳號（每個帳號一 script）
+- [x] **Sheets tab 變動**（2026-04-23 closed）→ **不做自動偵測**；小蘭改 tab 名稱頻率低，由 Apps Script 錯誤 log 觸發人工修 `xiaolan_settings.sheet_tabs` config 即可。
+- [x] **xiaolan 歷史資料 import**（2026-04-23 closed）→ **不匯**；以 pilot cutoff 為界、new_erp 重新開始。lt-erp 保留當 archive 查詢用。會計上的跨系統銜接另議。
+- [x] **`_shared/SupabaseClient.gs` 是否封裝**（2026-04-23 closed）→ **defer P1**；v1 各子 script 各寫 HTTP helper（4 個 script × 30 行 = 可接受的 duplication）。等 4 個 script 穩定後再抽共用 lib（Apps Script Library 模式）。
+- [x] **1688 / 拼多多 API 是否真的有 open API**（2026-04-23 closed）→ **沒 API、不做自動化**；使用者確認 1688 與拼多多**都不提供可用 open API**。改走**手動 CSV 下載 + 後台上傳**流程（類樂樂 CSV）。連帶 [[PRD-採購模組-v0.2-addendum]] §8 Q4 決定「不存憑證」。
+- [x] **Apps Script quota**（2026-04-23 closed）→ **不分帳號**；量級估算（100 家 × 幾次 daily sync << 20k/day limit）；爆了再分。
 
 ---
 
