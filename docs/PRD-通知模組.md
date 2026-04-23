@@ -109,6 +109,14 @@ tags: [PRD, ERP, 通知, Notification, LINE, OA, Franchise, c混合型]
 | `pickup_overdue` | 顧客 | 每日 09:00 批次 | 批次 | 隨時 | ✅ | ❌ | ❌ |
 | `store_expiry_alert` | 店長 | 每日 08:00 彙整 | 批次 | 全天 | ✅ | ✅ | ❌ |
 | `store_pickup_overdue` | 店長 | 每日 09:00 批次 | 批次 | 全天 | ✅ | ✅ | ❌ |
+| `invoice_threshold_warning` | 加盟主 | 月累計營收 ≥ 80% × threshold | 批次（日） | 全天 | ✅ | ✅ | ✅ |
+
+> `invoice_threshold_warning`（2026-04-23 新增，配合 Q17 per-store 發票模式）
+> 🎯 **觸發條件**：`stores.invoice_mode = 'none'` 且 當月累計 `customer_orders.total_amount` ≥ `stores.monthly_revenue_threshold_cents × 0.8`（預設 NT$160,000）
+> 🔁 **頻率**：日批次（避免洗版）；100% 仍停留 `none` → 改為週提醒 + admin dashboard 紅點
+> 📝 **範本預設**：「您本月營業額已達 16 萬、接近 20 萬門檻。依稅法、超過須強制開立發票。建議到後台『發票設定』啟用電子發票（ezPay 開通約 24~48 小時）。詳情：[設定連結]」
+> 🚫 **模式無差別發送**：即使店家 `notification_mode = 'none'` 也要發（法遵風險 override 加盟店自主），見 [[PRD-訂單取貨模組]] §7.12
+> 📎 **相關**：[[decisions/2026-04-23-系統立場-混合型]]（C 混合型的法遵底線例外）、[[PRD-訂單取貨模組]] §7.12 / §13 Q17
 
 ### 6.2 取貨期限（含公休日順延）
 - [x] 預設 **5 天**（可由各店 `stores.pickup_window_days` 覆寫）
