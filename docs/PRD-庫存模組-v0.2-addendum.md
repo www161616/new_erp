@@ -1,10 +1,10 @@
 ---
 title: PRD - 庫存模組 v0.2 Addendum
 module: Inventory
-status: draft-v0.2
+status: v0.2-qclosed
 owner: alex.chen
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
 base: PRD-庫存模組.md (v0.1)
 tags: [PRD, ERP, v0.2, addendum, 庫存, lt-erp-integration, demand-request, mutual-aid, transfer-settlement]
 ---
@@ -521,10 +521,10 @@ admin dashboard → 看所有 open 需求 →
 
 - [x] ~~**出清折扣率是否可調**~~：Flag 7 C — 固定三選一 enum `(0.88, 0.85, 0.80)`
 - [x] ~~**月結算 vs 應付模組耦合**~~：Flag 8 B — net>0 自動建 vendor_bill（詳見 §3.5 + §4.6）
-- [ ] **mutual_aid 是否要總倉參與**：現在 board 只限店↔店；若總倉也要貼（出清庫存）→ 加 `offering_store_id` 可以是「HQ location」
-- [ ] **backorder rollover 的顧客 opt-out**：顧客可能不想等、想直接退款 → 需 `customer_orders.rollover_opt_out` flag（v0.2+）
-- [ ] **加盟店 supplier mapping**：Flag 8 依賴每家 `stores` 有對應 `suppliers` row — 建立規則（手動 / 自動 on store create）留 PRD #5 決定
-- [ ] **net=0 月結算處理**：不建 vendor_bill、直接標 confirmed；若未來需要「零結算也要記錄」再改
+- [x] **mutual_aid 是否要總倉參與**（2026-04-23 closed）→ **否，只限店↔店**。總倉出貨走正規 PO / 採購模組，避免帳務混淆（批發價 vs 成本價 vs 互助價）。符合 [[decisions/2026-04-23-系統立場-混合型]] 「總部統一項：供應鏈」。
+- [x] **backorder rollover 的顧客 opt-out**（2026-04-23 closed）→ **給選項**（婆婆媽媽客群綁住會抱怨）。schema 新增 `customer_orders.rollover_opt_out BOOLEAN DEFAULT FALSE`；顧客勾選 = 缺貨直接退款、不 rollover。
+- [x] **加盟店 supplier mapping**（2026-04-23 closed，由 AP 模組統一解）→ **on-demand**：不預建、第一次結帳時由 `ensure_store_supplier()` 建立；避免 100 家店預建污染 supplier 清單。見 [[PRD-應付帳款零用金-v0.2]] §4.7。
+- [x] **net=0 月結算處理**（2026-04-23 closed）→ **不建 vendor_bill、直接標 confirmed**；省資料、追蹤靠 transfer_events 表 join。若未來稽核需零結算紀錄再改。
 
 ---
 
