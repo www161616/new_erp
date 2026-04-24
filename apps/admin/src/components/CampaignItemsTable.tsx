@@ -170,7 +170,18 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
               <li key={s.id}>
                 <button
                   type="button"
-                  onClick={() => setAdding({ sku: s, price: "", cap: "" })}
+                  onClick={async () => {
+                    // 從 prices 抓最新 retail 價當預設
+                    const { data: pData } = await getSupabase()
+                      .from("prices")
+                      .select("price")
+                      .eq("sku_id", s.id)
+                      .eq("scope", "retail")
+                      .order("effective_from", { ascending: false })
+                      .limit(1);
+                    const defaultPrice = pData?.[0]?.price != null ? String(Number(pData[0].price)) : "";
+                    setAdding({ sku: s, price: defaultPrice, cap: "" });
+                  }}
                   className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
                 >
                   <span className="font-mono">{s.sku_code}</span>
@@ -199,8 +210,9 @@ export function CampaignItemsTable({ campaignId }: { campaignId: number }) {
                 className="w-28 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-800" />
             </label>
             <label className="text-sm">
-              <div className="text-xs text-zinc-500">量上限</div>
+              <div className="text-xs text-zinc-500">量上限<span className="ml-1 text-zinc-400">（空=無上限）</span></div>
               <input type="number" step="0.001" value={adding.cap} onChange={(e) => setAdding({ ...adding, cap: e.target.value })}
+                placeholder="無上限"
                 className="w-28 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-800" />
             </label>
             <button type="button" onClick={addItem} className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200">加入</button>
