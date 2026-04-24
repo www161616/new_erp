@@ -29,9 +29,9 @@ Deno.serve(async (req) => {
     const state  = url.searchParams.get("state");
     const error  = url.searchParams.get("error");
 
-    if (error) return redirectFront("/signup", { error });
+    if (error) return redirectFront("/", { error });
     if (!code || !state) {
-      return redirectFront("/signup", { error: "missing_code_or_state" });
+      return redirectFront("/", { error: "missing_code_or_state" });
     }
 
     // env
@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("oauth callback error:", msg);
-    return redirectFront("/signup", { error: "oauth_failed", detail: msg });
+    return redirectFront("/", { error: "oauth_failed", detail: msg });
   }
 });
 
