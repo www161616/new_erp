@@ -21,6 +21,7 @@ type MemberRow = {
 };
 
 type Tier = { id: number; code: string; name: string };
+type Store = { id: number; code: string; name: string };
 
 const STATUS_LABEL: Record<Status, string> = {
   active: "活躍",
@@ -66,14 +67,23 @@ export default function MembersListPage() {
   }, [tierId, status, storeId, sortBy, sortDir]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const [t, s] = await Promise.all([
         getSupabase().from("member_tiers").select("id, code, name").order("sort_order"),
         getSupabase().from("stores").select("id, code, name").eq("is_active", true).order("name"),
       ]);
-      if (t.data) setTiers(t.data as Tier[]);
-      if (s.data) setStores(s.data as Store[]);
+      if (cancelled) return;
+      if (t.error || s.error) {
+        setError(t.error?.message ?? s.error?.message ?? "載入篩選選項失敗");
+        return;
+      }
+      setTiers((t.data ?? []) as Tier[]);
+      setStores((s.data ?? []) as Store[]);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
