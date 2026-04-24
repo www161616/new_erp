@@ -110,6 +110,20 @@ export function ProductForm({
     setValues((v) => ({ ...v, [key]: value }));
   }
 
+  // 新建商品時：選溫層就（重新）產生商品編號；之後可手動改
+  const [codeIsAuto, setCodeIsAuto] = useState(true);
+  useEffect(() => {
+    if (values.id != null) return;
+    if (!codeIsAuto) return;
+    (async () => {
+      const { data } = await getSupabase().rpc("rpc_next_product_code", {
+        p_storage_type: values.storage_type,
+      });
+      if (typeof data === "string") setValues((v) => ({ ...v, product_code: data }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.storage_type, values.id, codeIsAuto]);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -119,10 +133,18 @@ export function ProductForm({
       return;
     }
 
+    let code = values.product_code;
+    if (!code && values.id == null) {
+      const { data } = await getSupabase().rpc("rpc_next_product_code", {
+        p_storage_type: values.storage_type,
+      });
+      if (typeof data === "string") code = data;
+    }
+
     setSaving(true);
     const { data, error: err } = await getSupabase().rpc("rpc_upsert_product", {
       p_id: values.id,
-      p_product_code: values.product_code,
+      p_product_code: code,
       p_name: values.name,
       p_short_name: values.short_name || null,
       p_brand_id: values.brand_id,
@@ -163,13 +185,19 @@ export function ProductForm({
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       <Grid>
-        <Field label="商品編號" required>
+        <Field label="商品編號">
           <input
-            required
             value={values.product_code}
-            onChange={(e) => set("product_code", e.target.value)}
+            onChange={(e) => { setCodeIsAuto(false); set("product_code", e.target.value); }}
+            placeholder={values.id == null ? "選溫層後自動產生（可手動覆蓋）" : ""}
             className={inputClass}
           />
+          {values.id == null && (
+            <p className="mt-1 text-[11px] text-zinc-500">
+              {codeIsAuto ? "自動依溫層產生 — " : "已手動指定 — "}
+              前綴：F=冷凍 / R=冷藏 / A=常溫 / M=餐車 / G=未指定
+            </p>
+          )}
         </Field>
         <Field label="狀態" required>
           <select
