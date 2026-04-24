@@ -123,7 +123,7 @@ export default function RegisterPage() {
               <div className="text-base font-semibold">{lineName ?? "(未提供)"}</div>
             </div>
           </div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-zinc-600">
             {lineUserId && (
               <>
                 <dt className="text-zinc-400">LINE ID</dt>

@@ -3,18 +3,18 @@
 :root {
   --background: #ffffff;
   --foreground: #18181b;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #fafafa;
-  }
+  --card-bg: #fafaf9;
+  --border: #e4e4e7;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+}
+
+/* 固定淺色系（顧客端、避免深色環境太酷） */
+html {
+  color-scheme: light;
 }
 
 body {
