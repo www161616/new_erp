@@ -15,10 +15,18 @@ type MemberRow = {
   member_no: string;
   name: string | null;
   phone: string | null;
+  avatar_url: string | null;
   tier_id: number | null;
   status: Status;
   updated_at: string;
 };
+
+/** 顯示手機，若是 LIFF auto-register 的 placeholder (line:Uxxxx) 則視為未填 */
+function displayPhone(p: string | null): string {
+  if (!p) return "—";
+  if (p.startsWith("line:")) return "—";
+  return p;
+}
 
 type Tier = { id: number; code: string; name: string };
 type Store = { id: number; code: string; name: string };
@@ -93,7 +101,7 @@ export default function MembersListPage() {
       try {
         let q = getSupabase()
           .from("members")
-          .select("id, member_no, name, phone, tier_id, status, updated_at", { count: "exact" })
+          .select("id, member_no, name, phone, avatar_url, tier_id, status, updated_at", { count: "exact" })
           .order(sortBy, { ascending: sortDir === "asc" })
           .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
@@ -263,8 +271,20 @@ export default function MembersListPage() {
                         {r.member_no}
                       </Link>
                     </Td>
-                    <Td>{r.name ?? "—"}</Td>
-                    <Td className="font-mono text-xs">{r.phone ?? "—"}</Td>
+                    <Td>
+                      <div className="flex items-center gap-2">
+                        {r.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                        ) : (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-[10px] text-zinc-500 dark:bg-zinc-800">
+                            {r.name?.[0] ?? "?"}
+                          </div>
+                        )}
+                        <span>{r.name ?? "—"}</span>
+                      </div>
+                    </Td>
+                    <Td className="font-mono text-xs">{displayPhone(r.phone)}</Td>
                     <Td className="text-xs text-zinc-600 dark:text-zinc-400">
                       {r.tier_id ? tierMap.get(r.tier_id)?.name ?? "—" : "—"}
                     </Td>
