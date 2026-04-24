@@ -24,8 +24,12 @@ supabase secrets set MEMBER_FRONT_BASE_URL=http://localhost:3001
 # v1 單 tenant：從 tenants 表取該唯一 tenant_id
 supabase secrets set DEFAULT_TENANT_ID=<your tenant uuid>
 
+# 我們自己簽 JWT 用的 secret（不能用 SUPABASE_ 前綴，Supabase 保留）
+# 值從 Dashboard > Settings > API > Legacy JWT Secret 抓
+supabase secrets set PROJECT_JWT_SECRET=<legacy HS256 secret>
+
 # Supabase 內建的（通常預設有、確認一下）
-# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_JWT_SECRET
+# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
 ```
 
 ### LINE Developers 後台要登記的 Callback URL
