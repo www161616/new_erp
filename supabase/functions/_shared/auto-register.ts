@@ -50,6 +50,7 @@ export async function autoRegister(p: {
         phone: placeholderPhone,
         name: p.lineName ?? "(未提供)",
         home_store_id: Number(p.storeId),
+        line_user_id: p.lineUserId,
         status: "active",
       }),
     });

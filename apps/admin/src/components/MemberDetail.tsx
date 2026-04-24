@@ -15,6 +15,7 @@ type Member = {
   status: string;
   notes: string | null;
   avatar_url: string | null;
+  line_user_id: string | null;
   joined_at: string;
   last_visit_at: string | null;
 };
@@ -55,7 +56,7 @@ export function MemberDetail({ memberId }: { memberId: number }) {
       const sb = getSupabase();
       const { data: m, error: err } = await sb
         .from("members")
-        .select("id, member_no, phone, name, gender, birthday, email, tier_id, status, notes, avatar_url, joined_at, last_visit_at")
+        .select("id, member_no, phone, name, gender, birthday, email, tier_id, status, notes, avatar_url, line_user_id, joined_at, last_visit_at")
         .eq("id", memberId).maybeSingle<Member>();
       if (cancelled) return;
       if (err) { setError(err.message); return; }
@@ -119,6 +120,12 @@ export function MemberDetail({ memberId }: { memberId: number }) {
         <Card label="加入時間">{new Date(member.joined_at).toLocaleString("zh-TW")}</Card>
         <Card label="最後消費">{member.last_visit_at ? new Date(member.last_visit_at).toLocaleString("zh-TW") : "—"}</Card>
       </div>
+
+      {member.line_user_id && (
+        <Card label="LINE User ID">
+          <span className="break-all font-mono text-xs">{member.line_user_id}</span>
+        </Card>
+      )}
 
       {member.notes && (
         <Card label="備註"><div className="whitespace-pre-wrap text-sm">{member.notes}</div></Card>
