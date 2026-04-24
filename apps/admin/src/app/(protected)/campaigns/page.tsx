@@ -215,13 +215,19 @@ export default function CampaignsListPage() {
         maxWidth="max-w-4xl"
       >
         {modal?.mode === "new" && (
-          <CampaignForm
-            onSaved={async (id) => {
-              setReloadTick((t) => t + 1);
-              await openEdit(id);
-            }}
-            onCancel={() => setModal(null)}
-          />
+          <div className="space-y-4">
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
+              先建立開團 → 自動進入編輯，加入商品明細
+            </div>
+            <CampaignForm
+              onSaved={async (id) => {
+                setReloadTick((t) => t + 1);
+                await openEdit(id);
+              }}
+              onCancel={() => setModal(null)}
+              submitLabel="建立並加商品"
+            />
+          </div>
         )}
         {modal?.mode === "edit" && (
           <div className="space-y-6">
