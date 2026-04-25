@@ -392,6 +392,13 @@ export default function PurchaseRequestsListPage() {
                       status={r.status}
                       reviewStatus={r.review_status}
                       compact
+                      events={{
+                        create: { href: `/purchase/requests/edit?id=${r.id}` },
+                        draft: { href: `/purchase/requests/edit?id=${r.id}` },
+                        submit: { href: `/purchase/requests/edit?id=${r.id}` },
+                        review: { href: `/purchase/requests/edit?id=${r.id}` },
+                        split: { href: `/purchase/orders` },
+                      }}
                     />
                   </Td>
                 </tr>
