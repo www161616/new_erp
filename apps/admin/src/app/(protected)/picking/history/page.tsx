@@ -148,7 +148,12 @@ export default function PickingHistoryPage() {
                       </button>
                     )}
                     {w.status === "shipped" && (
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400">✓ 已派貨</span>
+                      <button
+                        onClick={() => setEditing(w)}
+                        className="rounded-md border border-emerald-300 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950"
+                      >
+                        ✓ 已派貨 · 看明細
+                      </button>
                     )}
                     {w.status !== "shipped" && (
                       <button
@@ -388,13 +393,15 @@ function PickModal({
             </h2>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={saveEdits}
-              disabled={submitting}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "儲存中…" : `儲存修正 (${edits.size})`}
-            </button>
+            {wave.status !== "shipped" && (
+              <button
+                onClick={saveEdits}
+                disabled={submitting}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? "儲存中…" : `儲存修正 (${edits.size})`}
+              </button>
+            )}
             {wave.status !== "picked" && wave.status !== "shipped" && (
               <button
                 onClick={confirmAsPicked}
