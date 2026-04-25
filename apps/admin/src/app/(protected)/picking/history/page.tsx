@@ -138,17 +138,44 @@ export default function PickingHistoryPage() {
                   {new Date(w.created_at).toLocaleString("zh-TW")}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  {(w.status === "draft" || w.status === "picking" || w.status === "picked") && (
-                    <button
-                      onClick={() => setEditing(w)}
-                      className="rounded-md bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600"
-                    >
-                      修正數量
-                    </button>
-                  )}
-                  {w.status === "shipped" && (
-                    <span className="text-xs text-emerald-600 dark:text-emerald-400">✓ 已派貨</span>
-                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    {(w.status === "draft" || w.status === "picking" || w.status === "picked") && (
+                      <button
+                        onClick={() => setEditing(w)}
+                        className="rounded-md bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600"
+                      >
+                        修正數量
+                      </button>
+                    )}
+                    {w.status === "shipped" && (
+                      <span className="text-xs text-emerald-600 dark:text-emerald-400">✓ 已派貨</span>
+                    )}
+                    {w.status !== "shipped" && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`確認刪除撿貨單 ${w.wave_code}？此操作無法復原。`)) return;
+                          try {
+                            const sb = getSupabase();
+                            const { data: userRes } = await sb.auth.getUser();
+                            const operator = userRes?.user?.id;
+                            if (!operator) throw new Error("未登入");
+                            const { error: e } = await sb.rpc("rpc_delete_picking_wave", {
+                              p_wave_id: w.id,
+                              p_operator: operator,
+                            });
+                            if (e) throw new Error(e.message);
+                            alert("已刪除");
+                            setReloadTick((t) => t + 1);
+                          } catch (err) {
+                            alert(`刪除失敗: ${err instanceof Error ? err.message : String(err)}`);
+                          }
+                        }}
+                        className="rounded-md bg-red-500 px-3 py-1 text-xs font-semibold text-white hover:bg-red-600"
+                      >
+                        刪除
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

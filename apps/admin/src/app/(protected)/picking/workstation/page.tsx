@@ -13,6 +13,9 @@ type DemandRow = {
   store_name: string;
   demand_qty: number;
   campaign_ids: number[];
+  received_qty: number; // 已進庫量
+  po_numbers: string[] | null;
+  order_numbers: string[] | null;
 };
 
 type SkuCard = {
@@ -23,6 +26,10 @@ type SkuCard = {
   by_store: Map<number, number>;
   short_stores: { id: number; name: string; qty: number }[]; // 欠品店家
   close_date: string; // 結單日
+  received_qty: number; // 已進庫量
+  is_short: boolean; // 是否缺貨（進庫量 < 訂單需求）
+  po_numbers: string[]; // PO 單號集合
+  order_numbers: string[]; // 訂單號集合
 };
 
 type SelectedItem = {
@@ -44,6 +51,7 @@ export default function PickingWorkstationPage() {
   const [demandHistory, setDemandHistory] = useState<Map<string, DemandRow[]>>(new Map()); // closeDate -> rows
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyNonZero, setShowOnlyNonZero] = useState(false);
+  const [expandedSkuIds, setExpandedSkuIds] = useState<Set<number>>(new Set());
 
   // 載入可用結單日
   useEffect(() => {
@@ -90,7 +98,7 @@ export default function PickingWorkstationPage() {
         const sb = getSupabase();
         const { data, error: e } = await sb
           .from("v_picking_demand_by_close_date")
-          .select("close_date, sku_id, sku_label, sku_code, store_id, store_name, demand_qty, campaign_ids")
+          .select("close_date, sku_id, sku_label, sku_code, store_id, store_name, demand_qty, campaign_ids, received_qty, po_numbers, order_numbers")
           .eq("close_date", closeDate);
         if (e) throw new Error(e.message);
         if (cancelled) return;
@@ -126,6 +134,8 @@ export default function PickingWorkstationPage() {
   const allSkuCards: SkuCard[] = useMemo(() => {
     if (!demand || !closeDate) return [];
     const m = new Map<number, SkuCard>();
+    const poSet = new Map<number, Set<string>>();
+    const orderSet = new Map<number, Set<string>>();
     for (const r of demand) {
       if (!m.has(r.sku_id)) {
         m.set(r.sku_id, {
@@ -136,11 +146,28 @@ export default function PickingWorkstationPage() {
           by_store: new Map(),
           short_stores: [],
           close_date: closeDate,
+          received_qty: Number(r.received_qty) || 0,
+          is_short: false,
+          po_numbers: [],
+          order_numbers: [],
         });
+        poSet.set(r.sku_id, new Set());
+        orderSet.set(r.sku_id, new Set());
       }
       const e = m.get(r.sku_id)!;
       e.total_demand += r.demand_qty;
       e.by_store.set(r.store_id, (e.by_store.get(r.store_id) ?? 0) + r.demand_qty);
+      // 聚合 PO 和訂單號
+      if (r.po_numbers) {
+        for (const po of r.po_numbers) {
+          if (po) poSet.get(r.sku_id)!.add(po);
+        }
+      }
+      if (r.order_numbers) {
+        for (const ord of r.order_numbers) {
+          if (ord) orderSet.get(r.sku_id)!.add(ord);
+        }
+      }
     }
     // 欠品店家 = 有需求量的分店
     for (const card of m.values()) {
@@ -152,6 +179,11 @@ export default function PickingWorkstationPage() {
         }
       }
       card.short_stores = arr.sort((a, b) => b.qty - a.qty);
+      // 檢查缺貨：進庫量 < 訂單需求
+      card.is_short = card.received_qty < card.total_demand;
+      // 設置 PO 和訂單號
+      card.po_numbers = Array.from(poSet.get(card.sku_id) || new Set()).sort();
+      card.order_numbers = Array.from(orderSet.get(card.sku_id) || new Set()).sort();
     }
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
@@ -170,6 +202,8 @@ export default function PickingWorkstationPage() {
 
   const selectedCards = useMemo(() => {
     const m = new Map<number, SkuCard>();
+    const poSet = new Map<number, Set<string>>();
+    const orderSet = new Map<number, Set<string>>();
     // 遍歷所有 selectedItems，聚合它們的數據
     for (const item of selectedItems) {
       const [cd, skuIdStr] = item.split("|");
@@ -188,15 +222,33 @@ export default function PickingWorkstationPage() {
           by_store: new Map(),
           short_stores: [],
           close_date: cd,
+          received_qty: 0,
+          is_short: false,
+          po_numbers: [],
+          order_numbers: [],
         });
+        poSet.set(skuId, new Set());
+        orderSet.set(skuId, new Set());
       }
       const card = m.get(skuId)!;
       for (const r of itemRows) {
         card.total_demand += r.demand_qty;
+        card.received_qty += Number(r.received_qty) || 0;
         card.by_store.set(r.store_id, (card.by_store.get(r.store_id) ?? 0) + r.demand_qty);
+        // 聚合 PO 和訂單號
+        if (r.po_numbers) {
+          for (const po of r.po_numbers) {
+            if (po) poSet.get(skuId)!.add(po);
+          }
+        }
+        if (r.order_numbers) {
+          for (const ord of r.order_numbers) {
+            if (ord) orderSet.get(skuId)!.add(ord);
+          }
+        }
       }
     }
-    // 重新計算欠品店家
+    // 重新計算欠品店家和缺貨狀態
     for (const card of m.values()) {
       const arr: { id: number; name: string; qty: number }[] = [];
       for (const [sid, q] of card.by_store) {
@@ -206,6 +258,9 @@ export default function PickingWorkstationPage() {
         }
       }
       card.short_stores = arr.sort((a, b) => b.qty - a.qty);
+      card.is_short = card.received_qty < card.total_demand;
+      card.po_numbers = Array.from(poSet.get(card.sku_id) || new Set()).sort();
+      card.order_numbers = Array.from(orderSet.get(card.sku_id) || new Set()).sort();
     }
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
@@ -242,6 +297,15 @@ export default function PickingWorkstationPage() {
       const next = new Set(cur);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleExpanded(skuId: number) {
+    setExpandedSkuIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(skuId)) next.delete(skuId);
+      else next.add(skuId);
       return next;
     });
   }
@@ -391,6 +455,7 @@ export default function PickingWorkstationPage() {
                 {filteredCards.map((c) => {
                   const key = `${closeDate}|${c.sku_id}`;
                   const selected = selectedItems.has(key);
+                  const isExpanded = expandedSkuIds.has(c.sku_id);
                   return (
                     <li
                       key={c.sku_id}
@@ -418,8 +483,14 @@ export default function PickingWorkstationPage() {
                       </div>
                       <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
                         叫貨：<span className="font-mono">{c.total_demand}</span>
+                        {" · "}已進庫：<span className="font-mono">{c.received_qty}</span>
                         {" · "}店家：{c.short_stores.length}
                       </div>
+                      {c.is_short && (
+                        <div className="mt-1 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+                          ⚠️ 缺貨 {c.total_demand - c.received_qty} 件
+                        </div>
+                      )}
                       {c.short_stores.length > 0 && (
                         <div className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">
                           {c.short_stores
@@ -427,6 +498,40 @@ export default function PickingWorkstationPage() {
                             .map((s) => `${s.name} ${s.qty}`)
                             .join("、")}
                           {c.short_stores.length > 8 && "…"}
+                        </div>
+                      )}
+                      {(c.po_numbers.length > 0 || c.order_numbers.length > 0) && (
+                        <div className="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+                          <button
+                            onClick={() => toggleExpanded(c.sku_id)}
+                            className="text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            {isExpanded ? "▼ 隱藏" : "▶ 採購單據"}
+                          </button>
+                          {isExpanded && (
+                            <div className="mt-1 space-y-1 text-[10px]">
+                              {c.po_numbers.length > 0 && (
+                                <div>
+                                  <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                    PO 單號：
+                                  </div>
+                                  <div className="text-zinc-600 dark:text-zinc-400">
+                                    {c.po_numbers.join("、")}
+                                  </div>
+                                </div>
+                              )}
+                              {c.order_numbers.length > 0 && (
+                                <div>
+                                  <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                    訂單號：
+                                  </div>
+                                  <div className="text-zinc-600 dark:text-zinc-400">
+                                    {c.order_numbers.join("、")}（共 {c.order_numbers.length} 筆）
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </li>
@@ -440,10 +545,17 @@ export default function PickingWorkstationPage() {
         {/* 右側：2. 分發作業大表 */}
         <section className="col-span-8 flex flex-col gap-2 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">
-              2. 分發作業大表（{selectedCards.length} 個 SKU、
-              {visibleStores.length}/{stores.length} 間分店）
-            </h2>
+            <div>
+              <h2 className="text-sm font-semibold">
+                2. 分發作業大表（{selectedCards.length} 個 SKU、
+                {visibleStores.length}/{stores.length} 間分店）
+              </h2>
+              {selectedCards.some((c) => c.is_short) && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  ⚠️ 部分商品缺貨，請確認進庫後再建立撿貨單
+                </p>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1 text-xs">
                 <input
