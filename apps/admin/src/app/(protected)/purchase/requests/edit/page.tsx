@@ -80,6 +80,8 @@ export default function EditPurchaseRequestPage() {
   const [campaignFinalized, setCampaignFinalized] = useState<boolean>(false);
   const [staffNames, setStaffNames] = useState<Map<string, string>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [missingCampaigns, setMissingCampaigns] = useState<{ id: number; name: string; campaign_no: string }[]>([]);
+  const [appending, setAppending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "submit" | "split" | null>(null);
@@ -158,10 +160,49 @@ export default function EditPurchaseRequestPage() {
             .from("group_buy_campaigns")
             .select("id, status")
             .in("id", campIds);
-          // 全部完成才算結算
           const allCompleted =
             (camps ?? []).length > 0 && (camps ?? []).every((c) => c.status === "completed");
           setCampaignFinalized(allCompleted);
+        }
+
+        // 偵測同 close_date 缺漏 campaign（PR 為 close_date 來源 + draft 才有意義）
+        if (prData.source_type === "close_date" && prData.source_close_date && prData.status === "draft") {
+          const { data: closedCamps } = await supabase
+            .from("group_buy_campaigns")
+            .select("id, name, campaign_no, end_at")
+            .eq("status", "closed");
+          const inPR = new Set(campIds);
+          const candidates = (closedCamps ?? []).filter((c) => {
+            if (!c.end_at) return false;
+            const d = new Date(c.end_at).toLocaleDateString("sv-SE");
+            return d === prData.source_close_date && !inPR.has(c.id);
+          });
+          // 進一步：只列有顧客訂單的（無訂單併入也沒意義）
+          const candidateIds = candidates.map((c) => c.id);
+          if (candidateIds.length) {
+            const { data: demandRows } = await supabase
+              .from("customer_orders")
+              .select("campaign_id, customer_order_items!inner(qty, status)")
+              .in("campaign_id", candidateIds)
+              .not("status", "in", "(cancelled,expired)");
+            type DemandRow = {
+              campaign_id: number;
+              customer_order_items: { qty: number; status: string }[] | { qty: number; status: string };
+            };
+            const hasDemand = new Set<number>();
+            for (const r of (demandRows as DemandRow[] | null) ?? []) {
+              const its = Array.isArray(r.customer_order_items)
+                ? r.customer_order_items
+                : [r.customer_order_items];
+              if (its.some((i) => !["cancelled", "expired"].includes(i.status) && Number(i.qty) > 0)) {
+                hasDemand.add(r.campaign_id);
+              }
+            }
+            const filtered = candidates.filter((c) => hasDemand.has(c.id));
+            setMissingCampaigns(filtered.map((c) => ({ id: c.id, name: c.name, campaign_no: c.campaign_no })));
+          } else {
+            setMissingCampaigns([]);
+          }
         }
 
         // 查 staff names（用於 timeline 顯示誰做的）
@@ -341,6 +382,38 @@ export default function EditPurchaseRequestPage() {
     }
   }
 
+  async function appendMissing() {
+    if (!id || missingCampaigns.length === 0) return;
+    if (
+      !confirm(
+        `要把 ${missingCampaigns.length} 個同日結單但未納入的團（${missingCampaigns
+          .map((c) => c.campaign_no)
+          .join(", ")}）併入本採購單嗎？`,
+      )
+    )
+      return;
+    setAppending(true);
+    setError(null);
+    try {
+      const supabase = getSupabase();
+      const { data: userData } = await supabase.auth.getUser();
+      for (const c of missingCampaigns) {
+        const { error: rpcErr } = await supabase.rpc("rpc_append_campaign_to_pr", {
+          p_pr_id: id,
+          p_campaign_id: c.id,
+          p_operator: userData.user?.id,
+        });
+        if (rpcErr) throw new Error(`${c.campaign_no}: ${rpcErr.message}`);
+      }
+      // reload page
+      window.location.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAppending(false);
+    }
+  }
+
   async function splitToPos() {
     if (!id || !destLocationId) return;
     if (unassignedCount > 0) {
@@ -412,6 +485,28 @@ export default function EditPurchaseRequestPage() {
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {error}
+        </div>
+      )}
+
+      {missingCampaigns.length > 0 && (
+        <div className="flex items-start justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <div>
+            <div className="font-semibold">⚠ 偵測到 {missingCampaigns.length} 個同日結單但未納入本採購單的團：</div>
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {missingCampaigns.map((c) => (
+                <li key={c.id}>
+                  <span className="font-mono">{c.campaign_no}</span>　{c.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <button
+            onClick={appendMissing}
+            disabled={appending}
+            className="shrink-0 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+          >
+            {appending ? "併入中…" : "📥 全部併入"}
+          </button>
         </div>
       )}
 
