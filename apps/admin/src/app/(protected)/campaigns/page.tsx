@@ -46,6 +46,7 @@ export default function CampaignsListPage() {
   >(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [closingId, setClosingId] = useState<number | null>(null);
+  const [finalizingId, setFinalizingId] = useState<number | null>(null);
 
   async function closeCampaign(id: number, name: string) {
     if (!confirm(`確定結單「${name}」？結單後可從採購單頁面「帶入該日商品」產生 PR。`)) return;
@@ -61,6 +62,23 @@ export default function CampaignsListPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setClosingId(null);
+    }
+  }
+
+  async function finalizeCampaign(id: number, name: string) {
+    if (!confirm(`整單結算「${name}」？結算後無法復原，請確認所有顧客訂單皆已完成 / 逾期 / 取消。`)) return;
+    setFinalizingId(id);
+    try {
+      const { error: rpcErr } = await getSupabase().rpc("rpc_finalize_campaign", {
+        p_campaign_id: id,
+        p_operator: (await getSupabase().auth.getUser()).data.user?.id,
+      });
+      if (rpcErr) throw new Error(rpcErr.message);
+      setReloadTick((t) => t + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFinalizingId(null);
     }
   }
 
@@ -225,6 +243,15 @@ export default function CampaignsListPage() {
                         className="text-xs text-amber-600 hover:underline disabled:opacity-50 dark:text-amber-400"
                       >
                         {closingId === r.id ? "結單中…" : "結單"}
+                      </button>
+                    )}
+                    {(["closed", "ordered", "receiving", "ready"] as Status[]).includes(r.status) && (
+                      <button
+                        onClick={() => finalizeCampaign(r.id, r.name)}
+                        disabled={finalizingId === r.id}
+                        className="text-xs text-purple-600 hover:underline disabled:opacity-50 dark:text-purple-400"
+                      >
+                        {finalizingId === r.id ? "結算中…" : "結算"}
                       </button>
                     )}
                   </div>
