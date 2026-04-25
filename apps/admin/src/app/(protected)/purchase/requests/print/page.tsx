@@ -90,7 +90,7 @@ export default function PrintPurchaseRequestPage() {
           skuIds.length
             ? supabase
                 .from("skus")
-                .select("id, sku_code, variant_name, products!inner(name, unit_uom)")
+                .select("id, sku_code, variant_name, base_unit, products!inner(name)")
                 .in("id", skuIds)
             : Promise.resolve({ data: [] as unknown[] }),
           supIds.length
@@ -110,7 +110,8 @@ export default function PrintPurchaseRequestPage() {
           id: number;
           sku_code: string;
           variant_name: string | null;
-          products: { name: string; unit_uom: string | null } | { name: string; unit_uom: string | null }[];
+          base_unit: string | null;
+          products: { name: string } | { name: string }[];
         };
         type SupLite = { id: number; name: string };
         type PriceLite = { sku_id: number; scope: string; price: number };
@@ -122,7 +123,7 @@ export default function PrintPurchaseRequestPage() {
             sku_code: s.sku_code,
             variant_name: s.variant_name,
             product_name: prod?.name ?? "?",
-            unit_uom: prod?.unit_uom ?? null,
+            unit_uom: s.base_unit ?? null,
           });
         }
 

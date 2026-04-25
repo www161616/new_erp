@@ -116,7 +116,7 @@ export default function EditPurchaseRequestPage() {
         const { data: skuRows } = await supabase
           .from("skus")
           .select(
-            "id, sku_code, variant_name, products!inner(name, unit_uom)",
+            "id, sku_code, variant_name, base_unit, products!inner(name)",
           )
           .in("id", skuIds);
 
@@ -146,7 +146,7 @@ export default function EditPurchaseRequestPage() {
                 sku_code: s.sku_code as string,
                 variant_name: s.variant_name as string | null,
                 product_name: prod?.name as string | null,
-                unit_uom: prod?.unit_uom as string | null,
+                unit_uom: (s.base_unit as string | null) ?? null,
               },
             ];
           }),
@@ -345,44 +345,6 @@ export default function EditPurchaseRequestPage() {
             )}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={`/purchase/requests/print?id=${id}`}
-            target="_blank"
-            rel="noopener"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            列印
-          </a>
-          {editable && (
-            <>
-              <button
-                onClick={saveDraft}
-                disabled={busy !== null}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-              >
-                {busy === "save" ? "存檔中…" : "存為草稿"}
-              </button>
-              <button
-                onClick={submitForReview}
-                disabled={busy !== null}
-                className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {busy === "submit" ? "送審中…" : "送出審核"}
-              </button>
-            </>
-          )}
-          {canSplit && (
-            <button
-              onClick={splitToPos}
-              disabled={busy !== null || unassignedCount > 0}
-              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-              title={unassignedCount > 0 ? "有未指派供應商" : ""}
-            >
-              {busy === "split" ? "拆 PO 中…" : "拆成採購訂單"}
-            </button>
-          )}
-        </div>
       </header>
 
       {error && (
@@ -391,8 +353,104 @@ export default function EditPurchaseRequestPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-md border border-zinc-200 dark:border-zinc-800">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+      {/* 左右兩欄：左 280px 工具/摘要/動作/備註，右側為採購清單表 */}
+      <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+        <aside className="flex flex-col gap-4">
+          {/* 摘要卡片 */}
+          <section className="rounded-md border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">摘要</h3>
+            <dl className="space-y-2 text-sm">
+              <Row label="品項數">{items.length}</Row>
+              <Row label="供應商">
+                {new Set(items.map((r) => r.suggested_supplier_id).filter(Boolean)).size}
+              </Row>
+              <Row label="未指派">
+                {unassignedCount > 0 ? (
+                  <span className="text-red-600 dark:text-red-400">{unassignedCount}</span>
+                ) : (
+                  0
+                )}
+              </Row>
+              <div className="my-2 border-t border-zinc-200 dark:border-zinc-700" />
+              <Row label="未稅小計">${totals.subtotal.toFixed(1)}</Row>
+              <Row label="含稅總計">
+                <span className="text-lg font-semibold text-blue-600 dark:text-blue-400">
+                  ${totals.withTax.toFixed(1)}
+                </span>
+              </Row>
+            </dl>
+          </section>
+
+          {/* 動作卡片 */}
+          <section className="rounded-md border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">動作</h3>
+            <div className="flex flex-col gap-2">
+              <a
+                href={`/purchase/requests/print?id=${id}`}
+                target="_blank"
+                rel="noopener"
+                className="rounded-md border border-zinc-300 px-3 py-2 text-center text-sm hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              >
+                🖨 列印
+              </a>
+              {editable && (
+                <>
+                  <button
+                    onClick={saveDraft}
+                    disabled={busy !== null}
+                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                  >
+                    {busy === "save" ? "存檔中…" : "💾 存為草稿"}
+                  </button>
+                  <button
+                    onClick={submitForReview}
+                    disabled={busy !== null}
+                    className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {busy === "submit" ? "送審中…" : "📤 送出審核"}
+                  </button>
+                </>
+              )}
+              {canSplit && (
+                <button
+                  onClick={splitToPos}
+                  disabled={busy !== null || unassignedCount > 0}
+                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                  title={unassignedCount > 0 ? "有未指派供應商" : ""}
+                >
+                  {busy === "split" ? "拆 PO 中…" : "📦 拆成採購訂單"}
+                </button>
+              )}
+              {!editable && !canSplit && (
+                <p className="text-xs text-zinc-500">此採購單已 {STATUS_LABEL[header.status]}，無可用動作。</p>
+              )}
+            </div>
+          </section>
+
+          {/* 備註卡片 */}
+          <section className="rounded-md border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">備註</h3>
+            <textarea
+              value={header.notes ?? ""}
+              onChange={(e) => setHeader({ ...header, notes: e.target.value })}
+              disabled={!editable}
+              rows={4}
+              placeholder="(選填)…"
+              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
+            />
+          </section>
+        </aside>
+
+        {/* 右側採購清單 */}
+        <div className="flex flex-col rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+            <h3 className="text-sm font-semibold">📋 內部採購清單</h3>
+            <span className="text-xs text-zinc-500">
+              *成本=廠商給的價格，售價=ERP 商品價格
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
           <thead className="bg-zinc-50 dark:bg-zinc-900">
             <tr>
               <Th>#</Th>
@@ -499,26 +557,18 @@ export default function EditPurchaseRequestPage() {
             )}
           </tbody>
         </table>
-      </div>
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <label className="block max-w-xl flex-1">
-          <span className="block pb-1 text-xs text-zinc-500">備註</span>
-          <textarea
-            value={header.notes ?? ""}
-            onChange={(e) => setHeader({ ...header, notes: e.target.value })}
-            disabled={!editable}
-            rows={2}
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
-          />
-        </label>
-        <div className="text-right text-sm">
-          <div className="text-zinc-500">未稅小計：${totals.subtotal.toFixed(1)}</div>
-          <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
-            ${totals.withTax.toFixed(1)}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt className="text-zinc-500">{label}</dt>
+      <dd className="font-mono">{children}</dd>
     </div>
   );
 }
