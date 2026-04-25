@@ -675,19 +675,23 @@ function buildEvents(
   names: Map<string, string>,
 ): PrStepEvents {
   const evt: PrStepEvents = {};
+  const prHref = `/purchase/requests/edit?id=${header.id}`;
   evt.create = {
     actor: nameOf(header.created_by, names),
     time: fmtTime(header.created_at),
     detail: header.pr_no,
+    href: prHref,
   };
   evt.draft = {
     actor: nameOf(header.updated_by, names),
     time: fmtTime(header.updated_at),
+    href: prHref,
   };
   if (header.submitted_at) {
     evt.submit = {
       actor: nameOf(header.updated_by, names),
       time: fmtTime(header.submitted_at),
+      href: prHref,
     };
   }
   if (header.reviewed_at) {
@@ -695,6 +699,7 @@ function buildEvents(
       actor: nameOf(header.reviewed_by, names),
       time: fmtTime(header.reviewed_at),
       detail: header.review_note ?? null,
+      href: prHref,
     };
   }
   if (pos.length > 0) {
@@ -703,6 +708,8 @@ function buildEvents(
       actor: nameOf(first.created_by, names),
       time: fmtTime(first.created_at),
       detail: `${pos.length} 張 PO：${pos.map((p) => p.po_no).join(", ")}`,
+      // 多張 PO 時跳列表頁；一張時直接跳該 PO（PO edit 頁未做、暫跳列表）
+      href: `/purchase/orders`,
     };
   }
   return evt;

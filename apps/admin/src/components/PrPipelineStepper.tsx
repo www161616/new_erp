@@ -3,9 +3,10 @@
 type StepState = "done" | "current" | "pending" | "rejected" | "skipped";
 
 type StepEvent = {
-  actor?: string | null; // 短碼 e.g. cktalex / 8c7af869
-  time?: string | null; // ISO 或 'YYYY-MM-DD HH:mm'
+  actor?: string | null; // e.g. cktalex
+  time?: string | null;
   detail?: string | null;
+  href?: string | null; // 可選：step 點擊跳轉
 };
 
 export type PrStepEvents = {
@@ -73,9 +74,10 @@ export function PrPipelineStepper({
             : undefined;
         return (
           <li key={s.key} className="flex flex-1 items-start">
-            <div
-              className="flex flex-col items-center text-center"
-              title={tooltip}
+            <StepInner
+              href={evt?.href ?? undefined}
+              tooltip={tooltip}
+              clickable={!!evt?.href}
             >
               <StepCircle state={s.state} index={i + 1} compact={compact} />
               <span
@@ -93,7 +95,7 @@ export function PrPipelineStepper({
                   {evt.time.replace(/\s.*/, "")}
                 </span>
               )}
-            </div>
+            </StepInner>
             {i < steps.length - 1 && (
               <div
                 className={`mt-3 h-0.5 flex-1 ${
@@ -109,6 +111,35 @@ export function PrPipelineStepper({
         );
       })}
     </ol>
+  );
+}
+
+function StepInner({
+  href,
+  tooltip,
+  clickable,
+  children,
+}: {
+  href?: string;
+  tooltip?: string;
+  clickable: boolean;
+  children: React.ReactNode;
+}) {
+  const baseCls = "flex flex-col items-center text-center";
+  const interactiveCls = clickable
+    ? "cursor-pointer rounded-md px-1 py-1 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+    : "";
+  if (href) {
+    return (
+      <a href={href} title={tooltip} className={`${baseCls} ${interactiveCls}`}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <div title={tooltip} className={baseCls}>
+      {children}
+    </div>
   );
 }
 
