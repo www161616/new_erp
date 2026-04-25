@@ -14,6 +14,8 @@ type DemandRow = {
   demand_qty: number;
   campaign_ids: number[];
   received_qty: number; // 已進庫量
+  po_numbers: string[] | null;
+  order_numbers: string[] | null;
 };
 
 type SkuCard = {
@@ -26,6 +28,8 @@ type SkuCard = {
   close_date: string; // 結單日
   received_qty: number; // 已進庫量
   is_short: boolean; // 是否缺貨（進庫量 < 訂單需求）
+  po_numbers: string[]; // PO 單號集合
+  order_numbers: string[]; // 訂單號集合
 };
 
 type SelectedItem = {
@@ -47,6 +51,7 @@ export default function PickingWorkstationPage() {
   const [demandHistory, setDemandHistory] = useState<Map<string, DemandRow[]>>(new Map()); // closeDate -> rows
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyNonZero, setShowOnlyNonZero] = useState(false);
+  const [expandedSkuIds, setExpandedSkuIds] = useState<Set<number>>(new Set());
 
   // 載入可用結單日
   useEffect(() => {
@@ -93,7 +98,7 @@ export default function PickingWorkstationPage() {
         const sb = getSupabase();
         const { data, error: e } = await sb
           .from("v_picking_demand_by_close_date")
-          .select("close_date, sku_id, sku_label, sku_code, store_id, store_name, demand_qty, campaign_ids")
+          .select("close_date, sku_id, sku_label, sku_code, store_id, store_name, demand_qty, campaign_ids, received_qty, po_numbers, order_numbers")
           .eq("close_date", closeDate);
         if (e) throw new Error(e.message);
         if (cancelled) return;
@@ -129,6 +134,8 @@ export default function PickingWorkstationPage() {
   const allSkuCards: SkuCard[] = useMemo(() => {
     if (!demand || !closeDate) return [];
     const m = new Map<number, SkuCard>();
+    const poSet = new Map<number, Set<string>>();
+    const orderSet = new Map<number, Set<string>>();
     for (const r of demand) {
       if (!m.has(r.sku_id)) {
         m.set(r.sku_id, {
@@ -139,13 +146,28 @@ export default function PickingWorkstationPage() {
           by_store: new Map(),
           short_stores: [],
           close_date: closeDate,
-          received_qty: Number(r.received_qty) ?? 0,
+          received_qty: Number(r.received_qty) || 0,
           is_short: false,
+          po_numbers: [],
+          order_numbers: [],
         });
+        poSet.set(r.sku_id, new Set());
+        orderSet.set(r.sku_id, new Set());
       }
       const e = m.get(r.sku_id)!;
       e.total_demand += r.demand_qty;
       e.by_store.set(r.store_id, (e.by_store.get(r.store_id) ?? 0) + r.demand_qty);
+      // 聚合 PO 和訂單號
+      if (r.po_numbers) {
+        for (const po of r.po_numbers) {
+          if (po) poSet.get(r.sku_id)!.add(po);
+        }
+      }
+      if (r.order_numbers) {
+        for (const ord of r.order_numbers) {
+          if (ord) orderSet.get(r.sku_id)!.add(ord);
+        }
+      }
     }
     // 欠品店家 = 有需求量的分店
     for (const card of m.values()) {
@@ -159,6 +181,9 @@ export default function PickingWorkstationPage() {
       card.short_stores = arr.sort((a, b) => b.qty - a.qty);
       // 檢查缺貨：進庫量 < 訂單需求
       card.is_short = card.received_qty < card.total_demand;
+      // 設置 PO 和訂單號
+      card.po_numbers = Array.from(poSet.get(card.sku_id) || new Set()).sort();
+      card.order_numbers = Array.from(orderSet.get(card.sku_id) || new Set()).sort();
     }
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
@@ -177,6 +202,8 @@ export default function PickingWorkstationPage() {
 
   const selectedCards = useMemo(() => {
     const m = new Map<number, SkuCard>();
+    const poSet = new Map<number, Set<string>>();
+    const orderSet = new Map<number, Set<string>>();
     // 遍歷所有 selectedItems，聚合它們的數據
     for (const item of selectedItems) {
       const [cd, skuIdStr] = item.split("|");
@@ -195,15 +222,33 @@ export default function PickingWorkstationPage() {
           by_store: new Map(),
           short_stores: [],
           close_date: cd,
+          received_qty: 0,
+          is_short: false,
+          po_numbers: [],
+          order_numbers: [],
         });
+        poSet.set(skuId, new Set());
+        orderSet.set(skuId, new Set());
       }
       const card = m.get(skuId)!;
       for (const r of itemRows) {
         card.total_demand += r.demand_qty;
+        card.received_qty += Number(r.received_qty) || 0;
         card.by_store.set(r.store_id, (card.by_store.get(r.store_id) ?? 0) + r.demand_qty);
+        // 聚合 PO 和訂單號
+        if (r.po_numbers) {
+          for (const po of r.po_numbers) {
+            if (po) poSet.get(skuId)!.add(po);
+          }
+        }
+        if (r.order_numbers) {
+          for (const ord of r.order_numbers) {
+            if (ord) orderSet.get(skuId)!.add(ord);
+          }
+        }
       }
     }
-    // 重新計算欠品店家
+    // 重新計算欠品店家和缺貨狀態
     for (const card of m.values()) {
       const arr: { id: number; name: string; qty: number }[] = [];
       for (const [sid, q] of card.by_store) {
@@ -213,6 +258,9 @@ export default function PickingWorkstationPage() {
         }
       }
       card.short_stores = arr.sort((a, b) => b.qty - a.qty);
+      card.is_short = card.received_qty < card.total_demand;
+      card.po_numbers = Array.from(poSet.get(card.sku_id) || new Set()).sort();
+      card.order_numbers = Array.from(orderSet.get(card.sku_id) || new Set()).sort();
     }
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
@@ -249,6 +297,15 @@ export default function PickingWorkstationPage() {
       const next = new Set(cur);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleExpanded(skuId: number) {
+    setExpandedSkuIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(skuId)) next.delete(skuId);
+      else next.add(skuId);
       return next;
     });
   }
@@ -398,6 +455,7 @@ export default function PickingWorkstationPage() {
                 {filteredCards.map((c) => {
                   const key = `${closeDate}|${c.sku_id}`;
                   const selected = selectedItems.has(key);
+                  const isExpanded = expandedSkuIds.has(c.sku_id);
                   return (
                     <li
                       key={c.sku_id}
@@ -440,6 +498,40 @@ export default function PickingWorkstationPage() {
                             .map((s) => `${s.name} ${s.qty}`)
                             .join("、")}
                           {c.short_stores.length > 8 && "…"}
+                        </div>
+                      )}
+                      {(c.po_numbers.length > 0 || c.order_numbers.length > 0) && (
+                        <div className="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+                          <button
+                            onClick={() => toggleExpanded(c.sku_id)}
+                            className="text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            {isExpanded ? "▼ 隱藏" : "▶ 採購單據"}
+                          </button>
+                          {isExpanded && (
+                            <div className="mt-1 space-y-1 text-[10px]">
+                              {c.po_numbers.length > 0 && (
+                                <div>
+                                  <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                    PO 單號：
+                                  </div>
+                                  <div className="text-zinc-600 dark:text-zinc-400">
+                                    {c.po_numbers.join("、")}
+                                  </div>
+                                </div>
+                              )}
+                              {c.order_numbers.length > 0 && (
+                                <div>
+                                  <div className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                    訂單號：
+                                  </div>
+                                  <div className="text-zinc-600 dark:text-zinc-400">
+                                    {c.order_numbers.join("、")}（共 {c.order_numbers.length} 筆）
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </li>
