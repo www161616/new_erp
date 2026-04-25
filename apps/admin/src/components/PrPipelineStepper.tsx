@@ -74,20 +74,23 @@ export function PrPipelineStepper({
         return (
           <li key={s.key} className="flex flex-1 items-start">
             <div
-              className="flex flex-col items-center"
+              className="flex flex-col items-center text-center"
               title={tooltip}
             >
               <StepCircle state={s.state} index={i + 1} compact={compact} />
-              {!compact && (
-                <span
-                  className={`mt-1.5 text-[11px] sm:text-xs ${labelCls(s.state)}`}
-                >
-                  {s.label}
+              <span
+                className={`mt-1.5 ${compact ? "text-[10px] leading-tight" : "text-[11px] sm:text-xs"} ${labelCls(s.state)}`}
+              >
+                {s.label}
+              </span>
+              {!compact && evt?.actor && s.state === "done" && (
+                <span className="mt-0.5 text-[10px] text-zinc-500 dark:text-zinc-500">
+                  {evt.actor}
                 </span>
               )}
-              {compact && (
-                <span className={`mt-0.5 text-[10px] leading-tight ${labelCls(s.state)}`}>
-                  {s.label}
+              {!compact && evt?.time && s.state === "done" && (
+                <span className="text-[10px] text-zinc-400 dark:text-zinc-600">
+                  {evt.time.replace(/\s.*/, "")}
                 </span>
               )}
             </div>

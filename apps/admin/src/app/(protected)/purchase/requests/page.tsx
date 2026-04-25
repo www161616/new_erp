@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { PrPipelineStepper } from "@/components/PrPipelineStepper";
 
 type Row = {
   id: number;
@@ -170,18 +171,19 @@ export default function PurchaseRequestsListPage() {
               <Th className="text-right">總金額</Th>
               <Th className="text-right">更新</Th>
               <Th></Th>
+              <Th className="min-w-[280px]">流程</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {rows === null ? (
               <tr>
-                <td colSpan={8} className="p-3 text-center text-zinc-500">
+                <td colSpan={9} className="p-3 text-center text-zinc-500">
                   載入中…
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-zinc-500">
+                <td colSpan={9} className="p-6 text-center text-zinc-500">
                   還沒有採購單，按「新增採購單」開始。
                 </td>
               </tr>
@@ -235,6 +237,13 @@ export default function PurchaseRequestsListPage() {
                         </>
                       )}
                     </div>
+                  </Td>
+                  <Td>
+                    <PrPipelineStepper
+                      status={r.status}
+                      reviewStatus={r.review_status}
+                      compact
+                    />
                   </Td>
                 </tr>
               ))

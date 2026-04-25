@@ -77,6 +77,7 @@ export default function EditPurchaseRequestPage() {
   const [header, setHeader] = useState<PRHeader | null>(null);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [derivedPOs, setDerivedPOs] = useState<DerivedPO[]>([]);
+  const [staffNames, setStaffNames] = useState<Map<string, string>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +146,26 @@ export default function EditPurchaseRequestPage() {
               .order("id");
             setDerivedPOs((pos ?? []) as DerivedPO[]);
           }
+        }
+
+        // 查 staff names（用於 timeline 顯示誰做的）
+        const allUids = new Set<string>();
+        if (prData.created_by) allUids.add(prData.created_by);
+        if (prData.updated_by) allUids.add(prData.updated_by);
+        if (prData.reviewed_by) allUids.add(prData.reviewed_by);
+        for (const r of itemRows ?? []) {
+          // PR items 沒有 by 欄位，這裡留空，未來若有需要再加
+          void r;
+        }
+        if (allUids.size) {
+          const { data: names } = await supabase.rpc("rpc_get_staff_names", {
+            p_uids: Array.from(allUids),
+          });
+          const m = new Map<string, string>();
+          for (const n of (names as { id: string; display_name: string }[] | null) ?? []) {
+            m.set(n.id, n.display_name);
+          }
+          setStaffNames(m);
         }
 
         const skuIds = (itemRows ?? []).map((r) => r.sku_id);
@@ -383,7 +404,7 @@ export default function EditPurchaseRequestPage() {
         <PrPipelineStepper
           status={header.status}
           reviewStatus={header.review_status}
-          events={buildEvents(header, derivedPOs)}
+          events={buildEvents(header, derivedPOs, staffNames)}
         />
       </div>
 
@@ -643,43 +664,43 @@ function fmtTime(iso: string | null): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleString("zh-TW", { hour12: false });
 }
-function shortUid(uid: string | null): string | null {
+function nameOf(uid: string | null, names: Map<string, string>): string | null {
   if (!uid) return null;
-  return uid.slice(0, 8);
+  return names.get(uid) ?? uid.slice(0, 8);
 }
 
-function buildEvents(header: PRHeader, pos: DerivedPO[]): PrStepEvents {
+function buildEvents(
+  header: PRHeader,
+  pos: DerivedPO[],
+  names: Map<string, string>,
+): PrStepEvents {
   const evt: PrStepEvents = {};
   evt.create = {
-    actor: shortUid(header.created_by),
+    actor: nameOf(header.created_by, names),
     time: fmtTime(header.created_at),
     detail: header.pr_no,
   };
-  // 編輯草稿：以最後 update 時間 + updated_by 為依據
   evt.draft = {
-    actor: shortUid(header.updated_by),
+    actor: nameOf(header.updated_by, names),
     time: fmtTime(header.updated_at),
   };
-  // 送審
   if (header.submitted_at) {
     evt.submit = {
-      actor: shortUid(header.updated_by),
+      actor: nameOf(header.updated_by, names),
       time: fmtTime(header.submitted_at),
     };
   }
-  // 審核
   if (header.reviewed_at) {
     evt.review = {
-      actor: shortUid(header.reviewed_by),
+      actor: nameOf(header.reviewed_by, names),
       time: fmtTime(header.reviewed_at),
       detail: header.review_note ?? null,
     };
   }
-  // 建立採購訂單：取第一張 PO 的時間
   if (pos.length > 0) {
     const first = pos[0];
     evt.split = {
-      actor: shortUid(first.created_by),
+      actor: nameOf(first.created_by, names),
       time: fmtTime(first.created_at),
       detail: `${pos.length} 張 PO：${pos.map((p) => p.po_no).join(", ")}`,
     };
