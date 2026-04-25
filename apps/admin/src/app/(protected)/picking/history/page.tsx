@@ -191,7 +191,7 @@ export default function PickingHistoryPage() {
       {editing && (
         <PickModal
           wave={editing}
-          onClose={() => setEditing(null)}
+          onClose={() => { setEditing(null); setReloadTick((t) => t + 1); }}
           onSubmitted={() => {
             setEditing(null);
             setReloadTick((t) => t + 1);
@@ -219,6 +219,7 @@ function PickModal({
   const [submitting, setSubmitting] = useState(false);
   const [shipping, setShipping] = useState(false);
   const [hqLocId, setHqLocId] = useState<number | null>(null);
+  const [effectiveStatus, setEffectiveStatus] = useState<string>(wave.status);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,8 +334,8 @@ function PickModal({
       setError("找不到總倉 location");
       return;
     }
-    if (wave.status !== "picked") {
-      setError(`撿貨單狀態為 ${wave.status}，需是 picked 才能派貨。請先確認修正完成。`);
+    if (effectiveStatus !== "picked") {
+      setError(`撿貨單狀態為 ${effectiveStatus}，需是 picked 才能派貨。請先確認修正完成。`);
       return;
     }
     if (!confirm(`確認派貨？將為 ${wave.store_count} 間分店產生 transfer 並從總倉出庫。`)) return;
@@ -362,17 +363,20 @@ function PickModal({
   }
 
   async function confirmAsPicked() {
-    if (wave.status === "picked") return;
+    if (effectiveStatus === "picked") return;
     setSubmitting(true);
     setError(null);
     try {
       const sb = getSupabase();
-      const { error: e } = await sb
-        .from("picking_waves")
-        .update({ status: "picked", updated_at: new Date().toISOString() })
-        .eq("id", wave.id);
+      const { data: userRes } = await sb.auth.getUser();
+      const operator = userRes?.user?.id;
+      if (!operator) throw new Error("未登入");
+      const { error: e } = await sb.rpc("rpc_confirm_picked", {
+        p_wave_id: wave.id,
+        p_operator: operator,
+      });
       if (e) throw new Error(e.message);
-      onSubmitted();
+      setEffectiveStatus("picked");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -388,12 +392,12 @@ function PickModal({
             <h2 className="font-semibold">
               修正數量：<span className="font-mono">{wave.wave_code}</span>{" "}
               <span className="text-xs text-zinc-500">
-                · 配送日 {wave.wave_date} · 狀態 {STATUS_LABEL[wave.status] ?? wave.status}
+                · 配送日 {wave.wave_date} · 狀態 {STATUS_LABEL[effectiveStatus] ?? effectiveStatus}
               </span>
             </h2>
           </div>
           <div className="flex gap-2">
-            {wave.status !== "shipped" && (
+            {effectiveStatus !== "shipped" && (
               <button
                 onClick={saveEdits}
                 disabled={submitting}
@@ -402,7 +406,7 @@ function PickModal({
                 {submitting ? "儲存中…" : `儲存修正 (${edits.size})`}
               </button>
             )}
-            {wave.status !== "picked" && wave.status !== "shipped" && (
+            {effectiveStatus !== "picked" && effectiveStatus !== "shipped" && (
               <button
                 onClick={confirmAsPicked}
                 disabled={submitting}
@@ -411,7 +415,7 @@ function PickModal({
                 ✅ 確認修正完成
               </button>
             )}
-            {wave.status === "picked" && (
+            {effectiveStatus === "picked" && (
               <button
                 onClick={ship}
                 disabled={shipping}
@@ -486,7 +490,7 @@ function PickModal({
                             <div className="flex flex-col">
                               <input
                                 inputMode="decimal"
-                                disabled={isShippedItem || wave.status === "shipped"}
+                                disabled={isShippedItem || effectiveStatus === "shipped"}
                                 value={cur}
                                 onChange={(e) => setEdit(it.id, e.target.value)}
                                 className={`w-14 rounded-md border px-1 py-0.5 text-right font-mono text-sm ${isEdited ? "border-amber-400 bg-amber-50 dark:bg-amber-950" : "border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-800"} disabled:bg-zinc-100 disabled:opacity-60 dark:disabled:bg-zinc-800`}
