@@ -1,0 +1,318 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { getSupabase } from "@/lib/supabase";
+
+type PRHeader = {
+  id: number;
+  pr_no: string;
+  source_close_date: string | null;
+  notes: string | null;
+};
+
+type ItemRow = {
+  id: number;
+  sku_id: number;
+  sku_code: string;
+  product_name: string;
+  variant_name: string | null;
+  unit_uom: string | null;
+  qty_requested: number;
+  unit_cost: number;
+  suggested_supplier_id: number | null;
+  supplier_name: string | null;
+  retail_price: number | null;
+  franchise_price: number | null;
+};
+
+type Group = {
+  supplier_id: number | null;
+  supplier_name: string;
+  rows: ItemRow[];
+  subtotal: number;
+};
+
+export default function PrintPurchaseRequestPage() {
+  const params = useSearchParams();
+  const idStr = params.get("id");
+  const id = idStr ? Number(idStr) : null;
+
+  const [header, setHeader] = useState<PRHeader | null>(null);
+  const [items, setItems] = useState<ItemRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [warehouseName, setWarehouseName] = useState<string>("");
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = getSupabase();
+        const [
+          { data: prData, error: prErr },
+          { data: itemRows, error: itemErr },
+        ] = await Promise.all([
+          supabase
+            .from("purchase_requests")
+            .select("id, pr_no, source_close_date, notes, source_location_id")
+            .eq("id", id)
+            .maybeSingle(),
+          supabase
+            .from("purchase_request_items")
+            .select("id, sku_id, qty_requested, unit_cost, suggested_supplier_id")
+            .eq("pr_id", id)
+            .order("suggested_supplier_id", { nullsFirst: false })
+            .order("id"),
+        ]);
+
+        if (cancelled) return;
+        if (prErr || !prData) throw new Error(prErr?.message ?? "找不到採購單");
+        if (itemErr) throw new Error(itemErr.message);
+
+        setHeader(prData as PRHeader);
+
+        if (prData.source_location_id) {
+          const { data: locRow } = await supabase
+            .from("locations")
+            .select("name")
+            .eq("id", prData.source_location_id)
+            .maybeSingle();
+          setWarehouseName(locRow?.name ?? "");
+        }
+
+        const skuIds = (itemRows ?? []).map((r) => r.sku_id);
+        const supIds = Array.from(
+          new Set((itemRows ?? []).map((r) => r.suggested_supplier_id).filter((x): x is number => !!x)),
+        );
+
+        const [{ data: skuRows }, { data: supRows }, { data: priceRows }] = await Promise.all([
+          skuIds.length
+            ? supabase
+                .from("skus")
+                .select("id, sku_code, variant_name, products!inner(name, unit_uom)")
+                .in("id", skuIds)
+            : Promise.resolve({ data: [] as unknown[] }),
+          supIds.length
+            ? supabase.from("suppliers").select("id, name").in("id", supIds)
+            : Promise.resolve({ data: [] as unknown[] }),
+          skuIds.length
+            ? supabase
+                .from("prices")
+                .select("sku_id, scope, price")
+                .in("sku_id", skuIds)
+                .in("scope", ["retail", "franchise"])
+                .eq("is_active", true)
+            : Promise.resolve({ data: [] as unknown[] }),
+        ]);
+
+        type SkuLite = {
+          id: number;
+          sku_code: string;
+          variant_name: string | null;
+          products: { name: string; unit_uom: string | null } | { name: string; unit_uom: string | null }[];
+        };
+        type SupLite = { id: number; name: string };
+        type PriceLite = { sku_id: number; scope: string; price: number };
+
+        const skuMap = new Map<number, { sku_code: string; variant_name: string | null; product_name: string; unit_uom: string | null }>();
+        for (const s of (skuRows as SkuLite[] | null) ?? []) {
+          const prod = Array.isArray(s.products) ? s.products[0] : s.products;
+          skuMap.set(s.id, {
+            sku_code: s.sku_code,
+            variant_name: s.variant_name,
+            product_name: prod?.name ?? "?",
+            unit_uom: prod?.unit_uom ?? null,
+          });
+        }
+
+        const supMap = new Map((supRows as SupLite[] | null)?.map((s) => [s.id, s.name]) ?? []);
+
+        const priceMap = new Map<number, { retail: number | null; franchise: number | null }>();
+        for (const id of skuIds) priceMap.set(id, { retail: null, franchise: null });
+        for (const p of (priceRows as PriceLite[] | null) ?? []) {
+          const e = priceMap.get(p.sku_id);
+          if (!e) continue;
+          if (p.scope === "retail") e.retail = Number(p.price);
+          if (p.scope === "franchise") e.franchise = Number(p.price);
+        }
+
+        const merged: ItemRow[] = (itemRows ?? []).map((r) => {
+          const m = skuMap.get(r.sku_id);
+          const p = priceMap.get(r.sku_id);
+          return {
+            id: r.id,
+            sku_id: r.sku_id,
+            sku_code: m?.sku_code ?? "?",
+            product_name: m?.product_name ?? "?",
+            variant_name: m?.variant_name ?? null,
+            unit_uom: m?.unit_uom ?? null,
+            qty_requested: Number(r.qty_requested),
+            unit_cost: Number(r.unit_cost),
+            suggested_supplier_id: r.suggested_supplier_id,
+            supplier_name: r.suggested_supplier_id
+              ? supMap.get(r.suggested_supplier_id) ?? "—"
+              : null,
+            retail_price: p?.retail ?? null,
+            franchise_price: p?.franchise ?? null,
+          };
+        });
+
+        setItems(merged);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const groups: Group[] = useMemo(() => {
+    const m = new Map<string, Group>();
+    for (const r of items) {
+      const key = String(r.suggested_supplier_id ?? "__none__");
+      if (!m.has(key)) {
+        m.set(key, {
+          supplier_id: r.suggested_supplier_id,
+          supplier_name: r.supplier_name ?? "未指派供應商",
+          rows: [],
+          subtotal: 0,
+        });
+      }
+      const g = m.get(key)!;
+      g.rows.push(r);
+      g.subtotal += r.qty_requested * r.unit_cost;
+    }
+    // 未指派排最後
+    return Array.from(m.values()).sort((a, b) => {
+      if (a.supplier_id === null) return 1;
+      if (b.supplier_id === null) return -1;
+      return a.supplier_name.localeCompare(b.supplier_name, "zh-TW");
+    });
+  }, [items]);
+
+  const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
+  const grandWithTax = grandTotal * 1.05;
+
+  if (!id) return <div className="p-6">缺少 id 參數</div>;
+  if (error) return <div className="p-6 text-red-600">{error}</div>;
+  if (!header) return <div className="p-6 text-zinc-500">載入中…</div>;
+
+  return (
+    <div className="bg-white p-8 text-black print:p-4">
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 1cm; }
+          .no-print { display: none !important; }
+          body { background: white; }
+          table { font-size: 10pt; }
+          .group-section { break-inside: avoid; }
+        }
+      `}</style>
+
+      <div className="no-print mb-4 flex justify-end gap-2">
+        <button
+          onClick={() => window.print()}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+        >
+          列印
+        </button>
+      </div>
+
+      <header className="mb-4 text-center">
+        <h1 className="text-2xl font-bold">
+          {warehouseName || "總倉"} - 內部採購單
+        </h1>
+        <div className="mt-1 text-sm text-zinc-600">
+          單號 {header.pr_no}　·　結單日 {header.source_close_date ?? "—"}
+        </div>
+      </header>
+
+      {groups.map((g) => (
+        <section key={g.supplier_id ?? "none"} className="group-section mb-6">
+          <div
+            className={`mb-2 flex items-baseline justify-between border-b-2 pb-1 text-sm font-semibold ${
+              g.supplier_id === null ? "border-red-500 text-red-700" : "border-zinc-700"
+            }`}
+          >
+            <span>供應商：{g.supplier_name}（{g.rows.length} 項）</span>
+          </div>
+
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-zinc-400 bg-zinc-100 text-xs">
+                <Th>項次</Th>
+                <Th>商品編號</Th>
+                <Th>商品名稱</Th>
+                <Th className="text-right">數量</Th>
+                <Th className="text-right">成本</Th>
+                <Th className="text-right">售價</Th>
+                <Th className="text-right">分店價</Th>
+                <Th className="text-right">利潤</Th>
+                <Th className="text-right">利潤小計</Th>
+                <Th className="text-right">小計</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {g.rows.map((r, idx) => {
+                const profit = (r.retail_price ?? 0) - r.unit_cost;
+                const profitSubtotal = profit * r.qty_requested;
+                const subtotal = r.qty_requested * r.unit_cost;
+                return (
+                  <tr key={r.id} className="border-b border-zinc-200">
+                    <Td>{idx + 1}</Td>
+                    <Td className="font-mono">{r.sku_code}</Td>
+                    <Td>
+                      {r.product_name}
+                      {r.variant_name ? `-${r.variant_name}` : ""}
+                    </Td>
+                    <Td className="text-right">
+                      {r.qty_requested}
+                      {r.unit_uom ?? ""}
+                    </Td>
+                    <Td className="text-right">${r.unit_cost.toFixed(0)}</Td>
+                    <Td className="text-right">
+                      {r.retail_price !== null ? `$${r.retail_price.toFixed(0)}` : "—"}
+                    </Td>
+                    <Td className="text-right">
+                      {r.franchise_price !== null ? `$${r.franchise_price.toFixed(0)}` : "—"}
+                    </Td>
+                    <Td className="text-right">${profit.toFixed(0)}</Td>
+                    <Td className="text-right">${profitSubtotal.toFixed(0)}</Td>
+                    <Td className="text-right font-medium">${subtotal.toFixed(0)}</Td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-zinc-50 text-sm font-semibold">
+                <td colSpan={9} className="px-2 py-1 text-right">
+                  小計
+                </td>
+                <td className="px-2 py-1 text-right">${g.subtotal.toFixed(0)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      ))}
+
+      <div className="mt-6 border-t-2 border-zinc-700 pt-3 text-right">
+        <div className="text-sm text-zinc-600">未稅總計：${grandTotal.toFixed(1)}</div>
+        <div className="text-2xl font-bold">${grandWithTax.toFixed(1)}</div>
+      </div>
+
+      {header.notes && (
+        <div className="mt-4 border-t border-zinc-300 pt-2 text-sm">
+          <div className="font-semibold">備註：</div>
+          <div className="whitespace-pre-wrap">{header.notes}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <th className={`px-2 py-1 text-left ${className}`}>{children}</th>;
+}
+function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return <td className={`px-2 py-1 ${className}`}>{children}</td>;
+}
