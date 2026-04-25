@@ -882,6 +882,14 @@ function buildEvents(
       href: pos.length === 1 ? `/purchase/orders/edit?id=${pos[0].id}` : `/purchase/orders`,
     };
   }
+  // S8 派貨 / S9 分店確認 — 顯示配送日
+  if (header.source_close_date) {
+    evt.ship = {
+      detail: `配送 ${header.source_close_date}`,
+      href: `/picking/history`,
+    };
+    evt.delivered = { detail: `配送 ${header.source_close_date}` };
+  }
   return evt;
 }
 

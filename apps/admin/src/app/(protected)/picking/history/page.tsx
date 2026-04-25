@@ -157,7 +157,37 @@ export default function PickingHistoryPage() {
               <tr key={w.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900">
                 <td className="px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300">
                   <div>{new Date(w.created_at).toLocaleString("zh-TW")}</div>
-                  <div className="text-zinc-500">📅 配送：{w.wave_date}</div>
+                  <div className="mt-1 flex items-center gap-1 text-zinc-500">
+                    <span>📅 配送：</span>
+                    {w.status === "shipped" || w.status === "cancelled" ? (
+                      <span>{w.wave_date}</span>
+                    ) : (
+                      <input
+                        type="date"
+                        value={w.wave_date}
+                        onChange={async (e) => {
+                          const newDate = e.target.value;
+                          if (!newDate || newDate === w.wave_date) return;
+                          try {
+                            const sb = getSupabase();
+                            const { data: userRes } = await sb.auth.getUser();
+                            const operator = userRes?.user?.id;
+                            if (!operator) throw new Error("未登入");
+                            const { error: er } = await sb.rpc("rpc_update_wave_date", {
+                              p_wave_id: w.id,
+                              p_new_date: newDate,
+                              p_operator: operator,
+                            });
+                            if (er) throw new Error(er.message);
+                            setReloadTick((t) => t + 1);
+                          } catch (err) {
+                            alert(`配送日更新失敗：${err instanceof Error ? err.message : String(err)}`);
+                          }
+                        }}
+                        className="rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-800"
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-2">
                   <div className="font-mono text-sm">{w.wave_code}</div>
