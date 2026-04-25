@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
-import { PrPipelineStepper, type PrStepEvents } from "@/components/PrPipelineStepper";
+import { PrPipelineStepper, type PrStepEvents, type POSummary } from "@/components/PrPipelineStepper";
 
 type PRHeader = {
   id: number;
@@ -77,6 +77,7 @@ export default function EditPurchaseRequestPage() {
   const [header, setHeader] = useState<PRHeader | null>(null);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [derivedPOs, setDerivedPOs] = useState<DerivedPO[]>([]);
+  const [campaignFinalized, setCampaignFinalized] = useState<boolean>(false);
   const [staffNames, setStaffNames] = useState<Map<string, string>>(new Map());
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,6 +147,21 @@ export default function EditPurchaseRequestPage() {
               .order("id");
             setDerivedPOs((pos ?? []) as DerivedPO[]);
           }
+        }
+
+        // 查 source campaigns（for 結算狀態）
+        const campIds = Array.from(
+          new Set((itemRows ?? []).map((r) => r.source_campaign_id).filter((x): x is number => !!x)),
+        );
+        if (campIds.length) {
+          const { data: camps } = await supabase
+            .from("group_buy_campaigns")
+            .select("id, status")
+            .in("id", campIds);
+          // 全部完成才算結算
+          const allCompleted =
+            (camps ?? []).length > 0 && (camps ?? []).every((c) => c.status === "completed");
+          setCampaignFinalized(allCompleted);
         }
 
         // 查 staff names（用於 timeline 顯示誰做的）
@@ -405,6 +421,8 @@ export default function EditPurchaseRequestPage() {
           status={header.status}
           reviewStatus={header.review_status}
           events={buildEvents(header, derivedPOs, staffNames)}
+          poSummary={computePOSummary(derivedPOs)}
+          campaignFinalized={campaignFinalized}
         />
       </div>
 
@@ -708,11 +726,47 @@ function buildEvents(
       actor: nameOf(first.created_by, names),
       time: fmtTime(first.created_at),
       detail: `${pos.length} 張 PO：${pos.map((p) => p.po_no).join(", ")}`,
-      // 多張 PO 時跳列表頁；一張時直接跳該 PO（PO edit 頁未做、暫跳列表）
-      href: `/purchase/orders`,
+      href: pos.length === 1 ? `/purchase/orders/edit?id=${pos[0].id}` : `/purchase/orders`,
+    };
+  }
+  // S6 發送供應商
+  const sentPOs = pos.filter((p) =>
+    ["sent", "partially_received", "fully_received", "closed"].includes(p.status),
+  );
+  if (sentPOs.length > 0) {
+    const earliest = sentPOs
+      .filter((p) => p.sent_at)
+      .sort((a, b) => (a.sent_at ?? "").localeCompare(b.sent_at ?? ""))[0];
+    if (earliest) {
+      evt.send = {
+        actor: nameOf(earliest.sent_by, names),
+        time: fmtTime(earliest.sent_at),
+        detail: `${sentPOs.length}/${pos.length} 張已發送`,
+        href: pos.length === 1 ? `/purchase/orders/edit?id=${pos[0].id}` : `/purchase/orders`,
+      };
+    }
+  }
+  // S7 收貨
+  const receivedFully = pos.filter((p) =>
+    ["fully_received", "closed"].includes(p.status),
+  );
+  if (receivedFully.length > 0) {
+    evt.receive = {
+      detail: `${receivedFully.length}/${pos.length} 張全部到貨`,
+      href: pos.length === 1 ? `/purchase/orders/edit?id=${pos[0].id}` : `/purchase/orders`,
     };
   }
   return evt;
+}
+
+export function computePOSummary(pos: DerivedPO[]): POSummary {
+  let sent = 0;
+  let receivedFully = 0;
+  for (const p of pos) {
+    if (["sent", "partially_received", "fully_received", "closed"].includes(p.status)) sent++;
+    if (["fully_received", "closed"].includes(p.status)) receivedFully++;
+  }
+  return { total: pos.length, sent, receivedFully };
 }
 
 function Th({ children, className = "" }: { children?: React.ReactNode; className?: string }) {

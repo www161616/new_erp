@@ -15,17 +15,30 @@ export type PrStepEvents = {
   submit?: StepEvent;
   review?: StepEvent;
   split?: StepEvent;
+  send?: StepEvent;
+  receive?: StepEvent;
+  finalize?: StepEvent;
+};
+
+export type POSummary = {
+  total: number; // 該 PR 拆出多少張 PO
+  sent: number; // status IN sent / partially_received / fully_received / closed
+  receivedFully: number; // status IN fully_received / closed
 };
 
 export function PrPipelineStepper({
   status,
   reviewStatus,
   events,
+  poSummary,
+  campaignFinalized,
   compact = false,
 }: {
   status: string;
   reviewStatus: string;
   events?: PrStepEvents;
+  poSummary?: POSummary;
+  campaignFinalized?: boolean;
   compact?: boolean;
 }) {
   const isCancelled = status === "cancelled";
@@ -63,6 +76,31 @@ export function PrPipelineStepper({
   else if (isRejected || isCancelled)
     steps.push({ key: "split", label: "建立採購訂單", state: "skipped" });
   else steps.push({ key: "split", label: "建立採購訂單", state: "pending" });
+
+  // S6 發送供應商
+  if (isRejected || isCancelled)
+    steps.push({ key: "send", label: "發送供應商", state: "skipped" });
+  else if (!poSummary || poSummary.total === 0 || poSummary.sent === 0)
+    steps.push({ key: "send", label: "發送供應商", state: "pending" });
+  else if (poSummary.sent < poSummary.total)
+    steps.push({ key: "send", label: "部分發送", state: "current" });
+  else steps.push({ key: "send", label: "已發送供應商", state: "done" });
+
+  // S7 收貨
+  if (isRejected || isCancelled)
+    steps.push({ key: "receive", label: "收貨", state: "skipped" });
+  else if (!poSummary || poSummary.total === 0 || poSummary.receivedFully === 0)
+    steps.push({ key: "receive", label: "收貨", state: "pending" });
+  else if (poSummary.receivedFully < poSummary.total)
+    steps.push({ key: "receive", label: "部分到貨", state: "current" });
+  else steps.push({ key: "receive", label: "全部到貨", state: "done" });
+
+  // S8 結算
+  if (isCancelled)
+    steps.push({ key: "finalize", label: "結算", state: "skipped" });
+  else if (campaignFinalized)
+    steps.push({ key: "finalize", label: "已結算", state: "done" });
+  else steps.push({ key: "finalize", label: "結算", state: "pending" });
 
   return (
     <ol className="flex items-start gap-1 sm:gap-2">
