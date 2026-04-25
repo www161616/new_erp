@@ -153,6 +153,14 @@ export function ProductSkuSection({ productId }: { productId: number }) {
     }
   }
 
+  async function deleteSku(sku: Sku) {
+    if (!confirm(`確定刪除規格「${sku.sku_code}${sku.variant_name ? ` / ${sku.variant_name}` : ""}」？\n（軟刪除：狀態改為「停產」、保留歷史紀錄）`)) return;
+    setError(null);
+    const { error: err } = await getSupabase().rpc("rpc_delete_sku", { p_id: sku.id });
+    if (err) { setError(err.message); return; }
+    await refresh();
+  }
+
   return (
     <section className="space-y-3 rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
       <header className="flex items-center justify-between">
@@ -222,13 +230,24 @@ export function ProductSkuSection({ productId }: { productId: number }) {
                         {s.id in prices ? `$${prices[s.id]}` : "—"}
                       </Td>
                       <Td className="text-right">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(s)}
-                          className="text-xs text-zinc-600 hover:underline dark:text-zinc-400"
-                        >
-                          編輯
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(s)}
+                            className="text-xs text-zinc-600 hover:underline dark:text-zinc-400"
+                          >
+                            編輯
+                          </button>
+                          {s.status !== "discontinued" && (
+                            <button
+                              type="button"
+                              onClick={() => deleteSku(s)}
+                              className="text-xs text-red-600 hover:underline dark:text-red-400"
+                            >
+                              刪除
+                            </button>
+                          )}
+                        </div>
                       </Td>
                     </tr>
                   )
