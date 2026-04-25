@@ -13,6 +13,7 @@ type DemandRow = {
   store_name: string;
   demand_qty: number;
   campaign_ids: number[];
+  received_qty: number; // 已進庫量
 };
 
 type SkuCard = {
@@ -23,6 +24,8 @@ type SkuCard = {
   by_store: Map<number, number>;
   short_stores: { id: number; name: string; qty: number }[]; // 欠品店家
   close_date: string; // 結單日
+  received_qty: number; // 已進庫量
+  is_short: boolean; // 是否缺貨（進庫量 < 訂單需求）
 };
 
 type SelectedItem = {
@@ -136,6 +139,8 @@ export default function PickingWorkstationPage() {
           by_store: new Map(),
           short_stores: [],
           close_date: closeDate,
+          received_qty: Number(r.received_qty) ?? 0,
+          is_short: false,
         });
       }
       const e = m.get(r.sku_id)!;
@@ -152,6 +157,8 @@ export default function PickingWorkstationPage() {
         }
       }
       card.short_stores = arr.sort((a, b) => b.qty - a.qty);
+      // 檢查缺貨：進庫量 < 訂單需求
+      card.is_short = card.received_qty < card.total_demand;
     }
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
@@ -418,8 +425,14 @@ export default function PickingWorkstationPage() {
                       </div>
                       <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
                         叫貨：<span className="font-mono">{c.total_demand}</span>
+                        {" · "}已進庫：<span className="font-mono">{c.received_qty}</span>
                         {" · "}店家：{c.short_stores.length}
                       </div>
+                      {c.is_short && (
+                        <div className="mt-1 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+                          ⚠️ 缺貨 {c.total_demand - c.received_qty} 件
+                        </div>
+                      )}
                       {c.short_stores.length > 0 && (
                         <div className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">
                           {c.short_stores
@@ -440,10 +453,17 @@ export default function PickingWorkstationPage() {
         {/* 右側：2. 分發作業大表 */}
         <section className="col-span-8 flex flex-col gap-2 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">
-              2. 分發作業大表（{selectedCards.length} 個 SKU、
-              {visibleStores.length}/{stores.length} 間分店）
-            </h2>
+            <div>
+              <h2 className="text-sm font-semibold">
+                2. 分發作業大表（{selectedCards.length} 個 SKU、
+                {visibleStores.length}/{stores.length} 間分店）
+              </h2>
+              {selectedCards.some((c) => c.is_short) && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  ⚠️ 部分商品缺貨，請確認進庫後再建立撿貨單
+                </p>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1 text-xs">
                 <input
