@@ -22,6 +22,13 @@ type SkuCard = {
   total_demand: number;
   by_store: Map<number, number>;
   short_stores: { id: number; name: string; qty: number }[]; // 欠品店家
+  close_date: string; // 結單日
+};
+
+type SelectedItem = {
+  key: string; // "${close_date}|${sku_id}"
+  close_date: string;
+  sku_id: number;
 };
 
 export default function PickingWorkstationPage() {
@@ -33,7 +40,8 @@ export default function PickingWorkstationPage() {
   const [stores, setStores] = useState<{ id: number; name: string; code: string | null }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [selectedSkuIds, setSelectedSkuIds] = useState<Set<number>>(new Set());
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set()); // "${close_date}|${sku_id}"
+  const [demandHistory, setDemandHistory] = useState<Map<string, DemandRow[]>>(new Map()); // closeDate -> rows
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyNonZero, setShowOnlyNonZero] = useState(false);
 
@@ -91,7 +99,8 @@ export default function PickingWorkstationPage() {
           demand_qty: Number(r.demand_qty),
         }));
         setDemand(rows);
-        setSelectedSkuIds(new Set()); // 換結單日 reset
+        // 保存到歷史記錄
+        setDemandHistory((prev) => new Map(prev).set(closeDate, rows));
 
         const storeIds = Array.from(new Set(rows.map((r) => r.store_id)));
         if (storeIds.length) {
@@ -115,7 +124,7 @@ export default function PickingWorkstationPage() {
   }, [closeDate]);
 
   const allSkuCards: SkuCard[] = useMemo(() => {
-    if (!demand) return [];
+    if (!demand || !closeDate) return [];
     const m = new Map<number, SkuCard>();
     for (const r of demand) {
       if (!m.has(r.sku_id)) {
@@ -126,6 +135,7 @@ export default function PickingWorkstationPage() {
           total_demand: 0,
           by_store: new Map(),
           short_stores: [],
+          close_date: closeDate,
         });
       }
       const e = m.get(r.sku_id)!;
@@ -146,7 +156,7 @@ export default function PickingWorkstationPage() {
     return Array.from(m.values()).sort((a, b) =>
       (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
     );
-  }, [demand, stores]);
+  }, [demand, stores, closeDate]);
 
   const filteredCards = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -158,10 +168,49 @@ export default function PickingWorkstationPage() {
     );
   }, [allSkuCards, searchTerm]);
 
-  const selectedCards = useMemo(
-    () => allSkuCards.filter((c) => selectedSkuIds.has(c.sku_id)),
-    [allSkuCards, selectedSkuIds],
-  );
+  const selectedCards = useMemo(() => {
+    const m = new Map<number, SkuCard>();
+    // 遍歷所有 selectedItems，聚合它們的數據
+    for (const item of selectedItems) {
+      const [cd, skuIdStr] = item.split("|");
+      const skuId = Number(skuIdStr);
+      const rows = demandHistory.get(cd) ?? [];
+      const itemRows = rows.filter((r) => r.sku_id === skuId);
+      if (itemRows.length === 0) continue;
+
+      if (!m.has(skuId)) {
+        const first = itemRows[0];
+        m.set(skuId, {
+          sku_id: skuId,
+          sku_code: first.sku_code,
+          sku_label: first.sku_label,
+          total_demand: 0,
+          by_store: new Map(),
+          short_stores: [],
+          close_date: cd,
+        });
+      }
+      const card = m.get(skuId)!;
+      for (const r of itemRows) {
+        card.total_demand += r.demand_qty;
+        card.by_store.set(r.store_id, (card.by_store.get(r.store_id) ?? 0) + r.demand_qty);
+      }
+    }
+    // 重新計算欠品店家
+    for (const card of m.values()) {
+      const arr: { id: number; name: string; qty: number }[] = [];
+      for (const [sid, q] of card.by_store) {
+        if (q > 0) {
+          const st = stores.find((s) => s.id === sid);
+          arr.push({ id: sid, name: st?.name ?? `#${sid}`, qty: q });
+        }
+      }
+      card.short_stores = arr.sort((a, b) => b.qty - a.qty);
+    }
+    return Array.from(m.values()).sort((a, b) =>
+      (a.sku_code ?? "").localeCompare(b.sku_code ?? ""),
+    );
+  }, [selectedItems, demandHistory, stores]);
 
   // 右側矩陣：篩有量欄位
   const visibleStores = useMemo(() => {
@@ -172,31 +221,44 @@ export default function PickingWorkstationPage() {
   }, [stores, selectedCards, showOnlyNonZero]);
 
   const allCampaignIds = useMemo(() => {
-    if (!demand) return [];
     const set = new Set<number>();
-    for (const r of demand) {
-      if (selectedSkuIds.has(r.sku_id)) {
-        for (const id of r.campaign_ids ?? []) set.add(id);
+    for (const item of selectedItems) {
+      const [cd, skuIdStr] = item.split("|");
+      const skuId = Number(skuIdStr);
+      const rows = demandHistory.get(cd) ?? [];
+      for (const r of rows) {
+        if (r.sku_id === skuId) {
+          for (const id of r.campaign_ids ?? []) set.add(id);
+        }
       }
     }
     return Array.from(set);
-  }, [demand, selectedSkuIds]);
+  }, [selectedItems, demandHistory]);
 
   function toggleSku(skuId: number) {
-    setSelectedSkuIds((cur) => {
+    if (!closeDate) return;
+    const key = `${closeDate}|${skuId}`;
+    setSelectedItems((cur) => {
       const next = new Set(cur);
-      if (next.has(skuId)) next.delete(skuId);
-      else next.add(skuId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
 
   function selectAll() {
-    setSelectedSkuIds(new Set(allSkuCards.map((c) => c.sku_id)));
+    if (!closeDate) return;
+    setSelectedItems((cur) => {
+      const next = new Set(cur);
+      for (const c of allSkuCards) {
+        next.add(`${closeDate}|${c.sku_id}`);
+      }
+      return next;
+    });
   }
 
   function clearAll() {
-    setSelectedSkuIds(new Set());
+    setSelectedItems(new Set());
   }
 
   async function createWave() {
@@ -327,7 +389,8 @@ export default function PickingWorkstationPage() {
             ) : (
               <ul className="space-y-2">
                 {filteredCards.map((c) => {
-                  const selected = selectedSkuIds.has(c.sku_id);
+                  const key = `${closeDate}|${c.sku_id}`;
+                  const selected = selectedItems.has(key);
                   return (
                     <li
                       key={c.sku_id}
@@ -434,7 +497,19 @@ export default function PickingWorkstationPage() {
                       <td className="sticky left-0 bg-white px-3 py-2 dark:bg-zinc-900">
                         <div className="flex items-start gap-2">
                           <button
-                            onClick={() => toggleSku(c.sku_id)}
+                            onClick={() => {
+                              // 移除該 SKU 的所有 selectedItems
+                              setSelectedItems((cur) => {
+                                const next = new Set(cur);
+                                for (const item of next) {
+                                  const [, skuIdStr] = item.split("|");
+                                  if (Number(skuIdStr) === c.sku_id) {
+                                    next.delete(item);
+                                  }
+                                }
+                                return next;
+                              });
+                            }}
                             title="從大表移除"
                             className="text-rose-500 hover:text-rose-600"
                           >
