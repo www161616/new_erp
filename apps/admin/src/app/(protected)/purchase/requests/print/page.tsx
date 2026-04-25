@@ -26,9 +26,25 @@ type ItemRow = {
   franchise_price: number | null;
 };
 
+type SupplierFull = {
+  id: number;
+  name: string;
+  code: string | null;
+  tax_id: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  payment_terms: string | null;
+  preferred_po_channel: string | null;
+  line_contact: string | null;
+  lead_time_days: number | null;
+};
+
 type Group = {
   supplier_id: number | null;
   supplier_name: string;
+  supplier_full: SupplierFull | null;
   rows: ItemRow[];
   subtotal: number;
 };
@@ -40,6 +56,7 @@ export default function PrintPurchaseRequestPage() {
 
   const [header, setHeader] = useState<PRHeader | null>(null);
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [supplierMap, setSupplierMap] = useState<Map<number, SupplierFull>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [warehouseName, setWarehouseName] = useState<string>("");
 
@@ -94,7 +111,12 @@ export default function PrintPurchaseRequestPage() {
                 .in("id", skuIds)
             : Promise.resolve({ data: [] as unknown[] }),
           supIds.length
-            ? supabase.from("suppliers").select("id, name").in("id", supIds)
+            ? supabase
+                .from("suppliers")
+                .select(
+                  "id, name, code, tax_id, contact_name, phone, email, address, payment_terms, preferred_po_channel, line_contact, lead_time_days",
+                )
+                .in("id", supIds)
             : Promise.resolve({ data: [] as unknown[] }),
         ]);
 
@@ -105,8 +127,6 @@ export default function PrintPurchaseRequestPage() {
           base_unit: string | null;
           products: { name: string } | { name: string }[];
         };
-        type SupLite = { id: number; name: string };
-
         const skuMap = new Map<number, { sku_code: string; variant_name: string | null; product_name: string; unit_uom: string | null }>();
         for (const s of (skuRows as SkuLite[] | null) ?? []) {
           const prod = Array.isArray(s.products) ? s.products[0] : s.products;
@@ -118,7 +138,13 @@ export default function PrintPurchaseRequestPage() {
           });
         }
 
-        const supMap = new Map((supRows as SupLite[] | null)?.map((s) => [s.id, s.name]) ?? []);
+        const supFullMap = new Map<number, SupplierFull>();
+        for (const s of (supRows as SupplierFull[] | null) ?? []) {
+          supFullMap.set(s.id, s);
+        }
+        const supMap = new Map<number, string>();
+        for (const [id, s] of supFullMap) supMap.set(id, s.name);
+        setSupplierMap(supFullMap);
 
         const merged: ItemRow[] = (itemRows ?? []).map((r) => {
           const m = skuMap.get(r.sku_id);
@@ -158,6 +184,9 @@ export default function PrintPurchaseRequestPage() {
         m.set(key, {
           supplier_id: r.suggested_supplier_id,
           supplier_name: r.supplier_name ?? "未指派供應商",
+          supplier_full: r.suggested_supplier_id
+            ? supplierMap.get(r.suggested_supplier_id) ?? null
+            : null,
           rows: [],
           subtotal: 0,
         });
@@ -172,7 +201,7 @@ export default function PrintPurchaseRequestPage() {
       if (b.supplier_id === null) return -1;
       return a.supplier_name.localeCompare(b.supplier_name, "zh-TW");
     });
-  }, [items]);
+  }, [items, supplierMap]);
 
   const grandTotal = groups.reduce((s, g) => s + g.subtotal, 0);
   const grandWithTax = grandTotal * 1.05;
@@ -218,8 +247,42 @@ export default function PrintPurchaseRequestPage() {
               g.supplier_id === null ? "border-red-500 text-red-700" : "border-zinc-700"
             }`}
           >
-            <span>供應商：{g.supplier_name}（{g.rows.length} 項）</span>
+            <span>供應商：{g.supplier_name}{g.supplier_full?.code ? `（${g.supplier_full.code}）` : ""}（{g.rows.length} 項）</span>
           </div>
+
+          {g.supplier_full && (
+            <div className="mb-2 grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-zinc-200 bg-zinc-50 p-2 text-xs">
+              {g.supplier_full.tax_id && (
+                <Field label="統編">{g.supplier_full.tax_id}</Field>
+              )}
+              {g.supplier_full.contact_name && (
+                <Field label="聯絡人">{g.supplier_full.contact_name}</Field>
+              )}
+              {g.supplier_full.phone && (
+                <Field label="電話">{g.supplier_full.phone}</Field>
+              )}
+              {g.supplier_full.email && (
+                <Field label="Email">{g.supplier_full.email}</Field>
+              )}
+              {g.supplier_full.address && (
+                <Field label="地址" full>
+                  {g.supplier_full.address}
+                </Field>
+              )}
+              {g.supplier_full.payment_terms && (
+                <Field label="付款條件">{g.supplier_full.payment_terms}</Field>
+              )}
+              {g.supplier_full.preferred_po_channel && (
+                <Field label="下單通路">
+                  {g.supplier_full.preferred_po_channel}
+                  {g.supplier_full.line_contact ? `（${g.supplier_full.line_contact}）` : ""}
+                </Field>
+              )}
+              {g.supplier_full.lead_time_days != null && (
+                <Field label="交期">{g.supplier_full.lead_time_days} 天</Field>
+              )}
+            </div>
+          )}
 
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -297,4 +360,20 @@ function Th({ children, className = "" }: { children: React.ReactNode; className
 }
 function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-2 py-1 ${className}`}>{children}</td>;
+}
+function Field({
+  label,
+  children,
+  full = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  full?: boolean;
+}) {
+  return (
+    <div className={full ? "col-span-2" : ""}>
+      <span className="text-zinc-500">{label}：</span>
+      <span className="text-zinc-800">{children}</span>
+    </div>
+  );
 }
