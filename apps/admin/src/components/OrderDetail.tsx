@@ -38,6 +38,7 @@ type TimelineStep = {
   done: boolean;
   detail?: string;
   detailHref?: string;
+  detailOnClick?: () => void;
 };
 
 function staffLabel(uid: string | null, names: Map<string, string>): string {
@@ -49,7 +50,13 @@ function fmtDt(iso: string): string {
   return new Date(iso).toLocaleString("zh-TW", { hour12: false });
 }
 
-export function OrderDetail({ orderId }: { orderId: number }) {
+export function OrderDetail({
+  orderId,
+  onNavigate,
+}: {
+  orderId: number;
+  onNavigate?: (orderId: number, orderNo: string) => void;
+}) {
   const [head, setHead] = useState<OrderHead | null>(null);
   const [items, setItems] = useState<ItemRow[] | null>(null);
   const [timeline, setTimeline] = useState<TimelineStep[] | null>(null);
@@ -98,7 +105,7 @@ export function OrderDetail({ orderId }: { orderId: number }) {
 
       // ========== 載入 timeline ==========
       const skuIds = itemsData.map((it) => it.sku?.id).filter((x): x is number => !!x);
-      const tl = await buildTimeline(headData, skuIds);
+      const tl = await buildTimeline(headData, skuIds, onNavigate);
       if (!cancelled) setTimeline(tl);
     })();
     return () => { cancelled = true; };
@@ -243,6 +250,7 @@ export function OrderDetail({ orderId }: { orderId: number }) {
 async function buildTimeline(
   head: OrderHead,
   skuIds: number[],
+  onNavigate?: (orderId: number, orderNo: string) => void,
 ): Promise<TimelineStep[]> {
   const sb = getSupabase();
 
@@ -251,6 +259,7 @@ async function buildTimeline(
     // 找新訂單號做 detail link（從 customer_orders 用 transferred_to_order_id）
     let newOrderInfo = "已轉出（流程關閉、不入金額統計）";
     let newOrderHref: string | undefined;
+    let newOrderClick: (() => void) | undefined;
     const { data: self } = await sb
       .from("customer_orders")
       .select("transferred_to_order_id")
@@ -266,7 +275,11 @@ async function buildTimeline(
       const newNo = (newOrd as { order_no: string } | null)?.order_no;
       if (newNo) {
         newOrderInfo = `已轉出 → 新訂單 ${newNo}`;
-        newOrderHref = `/orders?id=${newId}`;
+        if (onNavigate) {
+          newOrderClick = () => onNavigate(newId, newNo);
+        } else {
+          newOrderHref = `/orders?id=${newId}`;
+        }
       }
     }
     return [
@@ -276,6 +289,7 @@ async function buildTimeline(
         done: true,
         detail: newOrderInfo,
         detailHref: newOrderHref,
+        detailOnClick: newOrderClick,
       },
     ];
   }
@@ -450,7 +464,15 @@ function Timeline({ steps }: { steps: TimelineStep[] | null }) {
                 {s.label}
               </div>
               {s.detail && (
-                s.detailHref ? (
+                s.detailOnClick ? (
+                  <button
+                    type="button"
+                    onClick={s.detailOnClick}
+                    className="text-[10px] font-mono text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    {s.detail}
+                  </button>
+                ) : s.detailHref ? (
                   <a
                     href={s.detailHref}
                     className="text-[10px] font-mono text-blue-600 hover:underline dark:text-blue-400"

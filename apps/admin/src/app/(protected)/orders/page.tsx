@@ -221,7 +221,15 @@ export default function OrdersListPage() {
         title={`訂單明細 ${detailNo}`}
         maxWidth="max-w-4xl"
       >
-        {detailId !== null && <OrderDetail orderId={detailId} />}
+        {detailId !== null && (
+          <OrderDetail
+            orderId={detailId}
+            onNavigate={(id, no) => {
+              setDetailId(id);
+              setDetailNo(no);
+            }}
+          />
+        )}
       </Modal>
 
       {totalPages > 1 && (
