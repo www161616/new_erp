@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { OrderTransferModal } from "@/components/OrderTransferModal";
 
 type OrderHead = {
   id: number;
@@ -54,6 +55,8 @@ export function OrderDetail({ orderId }: { orderId: number }) {
   const [timeline, setTimeline] = useState<TimelineStep[] | null>(null);
   const [staffNames, setStaffNames] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,7 +102,7 @@ export function OrderDetail({ orderId }: { orderId: number }) {
       if (!cancelled) setTimeline(tl);
     })();
     return () => { cancelled = true; };
-  }, [orderId]);
+  }, [orderId, reloadTick]);
 
   if (error) {
     return (
@@ -113,8 +116,31 @@ export function OrderDetail({ orderId }: { orderId: number }) {
   const totalQty = items.reduce((s, i) => s + Number(i.qty), 0);
   const totalAmount = items.reduce((s, i) => s + Number(i.qty) * Number(i.unit_price), 0);
 
+  const canTransfer = ["pending", "confirmed", "reserved"].includes(head.status);
+  const isTransferredOut = head.status === "transferred_out";
+  const memberLabel = head.member
+    ? `${head.member.name ?? "—"} (${head.member.member_no})`
+    : `(${head.nickname_snapshot ?? "—"})`;
+
   return (
     <div className="space-y-4 text-sm">
+      {(canTransfer || isTransferredOut) && (
+        <div className="flex items-center justify-end gap-2">
+          {canTransfer && (
+            <button
+              onClick={() => setTransferOpen(true)}
+              className="rounded-md border border-blue-300 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-950"
+              title="客人棄單 / 轉到其他店店長 / 互助接手"
+            >
+              ↗ 轉出此訂單
+            </button>
+          )}
+          {isTransferredOut && (
+            <span className="text-xs text-zinc-500">⚠️ 此訂單已轉出</span>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Field label="訂單號" value={<span className="font-mono">{head.order_no}</span>} />
         <Field label="狀態" value={head.status} />
@@ -196,6 +222,20 @@ export function OrderDetail({ orderId }: { orderId: number }) {
           ※ 同顧客在同活動連 key 多次會合併到同一筆，舊 qty 被新值覆寫。如需「每次 +N 紀錄」請告知改完整版（加 append-only audit table）。
         </p>
       </div>
+
+      <OrderTransferModal
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        orderId={head.id}
+        orderNo={head.order_no}
+        currentPickupStoreId={head.pickup_store_id}
+        currentMemberLabel={memberLabel}
+        onSubmitted={(newId) => {
+          setTransferOpen(false);
+          alert(`訂單已轉出 → 新訂單 #${newId}`);
+          setReloadTick((n) => n + 1);
+        }}
+      />
     </div>
   );
 }
