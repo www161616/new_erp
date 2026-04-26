@@ -261,6 +261,7 @@ async function buildTimeline(
   let xferReceived = false;
   let receivedTs: string | null = null;
   let xferDetail = "";
+  let xferHref: string | undefined;
 
   if (campaignId && storeId && skuIds.length > 0) {
     // 找此 order 對應的 wave_ids（同 campaign + 同店 + 同 sku）
@@ -304,8 +305,14 @@ async function buildTimeline(
         .select("transfer_no, status, shipped_at, received_at")
         .in("transfer_no", transferNos);
       const xfers = ((ts as { transfer_no: string; status: string; shipped_at: string | null; received_at: string | null }[] | null) ?? []);
-      if (xfers.length > 0) {
+      if (xfers.length === 1) {
+        xferDetail = xfers[0].transfer_no;
+        xferHref = `/transfers/`;
+      } else if (xfers.length > 1) {
         xferDetail = `${xfers.length} 張 TR`;
+        xferHref = `/transfers/`;
+      }
+      if (xfers.length > 0) {
         const allShipped = xfers.every((t) => ["shipped", "received", "closed"].includes(t.status));
         if (allShipped) {
           xferShipped = true;
@@ -334,8 +341,8 @@ async function buildTimeline(
   return [
     { label: "採購到貨", ts: poTs, done: poDone, detail: poDetail || undefined },
     { label: "撿貨完成", ts: waveTs, done: wavePicked, detail: waveDetail || undefined, detailHref: waveHref },
-    { label: "派貨出倉", ts: shippedTs, done: xferShipped, detail: xferDetail || undefined },
-    { label: "分店收貨", ts: receivedTs, done: xferReceived },
+    { label: "派貨出倉", ts: shippedTs, done: xferShipped, detail: xferDetail || undefined, detailHref: xferHref },
+    { label: "分店收貨", ts: receivedTs, done: xferReceived, detail: xferDetail || undefined, detailHref: xferHref },
     { label: "顧客取貨", ts: null, done: pickedUp, detail: status },
   ];
 }
