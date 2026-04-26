@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { getSupabase } from "@/lib/supabase";
+import { translateRpcError } from "@/lib/rpcError";
 
 type Wave = {
   id: number;
@@ -108,7 +109,7 @@ export default function PickingHistoryPage() {
           setError(null);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(translateRpcError(e));
       }
     })();
     return () => {
@@ -195,7 +196,7 @@ export default function PickingHistoryPage() {
                             if (er) throw new Error(er.message);
                             setReloadTick((t) => t + 1);
                           } catch (err) {
-                            alert(`配送日更新失敗：${err instanceof Error ? err.message : String(err)}`);
+                            alert(`配送日更新失敗：${translateRpcError(err)}`);
                           }
                         }}
                         className="rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-800"
@@ -255,7 +256,7 @@ export default function PickingHistoryPage() {
                             alert("已刪除");
                             setReloadTick((t) => t + 1);
                           } catch (err) {
-                            alert(`刪除失敗: ${err instanceof Error ? err.message : String(err)}`);
+                            alert(`刪除失敗: ${translateRpcError(err)}`);
                           }
                         }}
                         className="rounded-md bg-red-500 px-3 py-1 text-xs font-semibold text-white hover:bg-red-600"
@@ -362,7 +363,7 @@ function PickModal({
           .limit(1);
         if (!cancelled) setHqLocId(((loc as { id: number }[] | null) ?? [])[0]?.id ?? null);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(translateRpcError(e));
       }
     })();
     return () => {
@@ -418,7 +419,7 @@ function PickModal({
       }
       onSubmitted();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(translateRpcError(e));
     } finally {
       setSubmitting(false);
     }
@@ -454,7 +455,7 @@ function PickModal({
       alert(`派貨完成！${wave.store_count} 張 transfer 已建立`);
       onSubmitted();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(translateRpcError(e));
     } finally {
       setShipping(false);
     }
@@ -476,7 +477,7 @@ function PickModal({
       if (e) throw new Error(e.message);
       setEffectiveStatus("picked");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(translateRpcError(e));
     } finally {
       setSubmitting(false);
     }
