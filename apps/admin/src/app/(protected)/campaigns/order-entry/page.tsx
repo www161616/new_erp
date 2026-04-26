@@ -14,6 +14,10 @@ type Campaign = {
 
 type Channel = { id: number; name: string; home_store_id: number };
 
+type Store = { id: number; code: string; name: string };
+
+type Mode = "customer" | "internal";
+
 type MemberRow = {
   id: number;
   member_no: string;
@@ -91,8 +95,13 @@ export default function OrderEntryPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState<number | null>(null);
+  const [stores, setStores] = useState<Store[]>([]);
   const [campaignSkus, setCampaignSkus] = useState<SkuOption[]>([]);
   const [entries, setEntries] = useState<CustomerEntry[]>([newEntry()]);
+  const [mode, setMode] = useState<Mode>("customer");
+  const [internalStoreId, setInternalStoreId] = useState<number | null>(null);
+  const [internalNotes, setInternalNotes] = useState("");
+  const [internalItems, setInternalItems] = useState<ItemRow[]>([emptyItem()]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -106,12 +115,14 @@ export default function OrderEntryPage() {
     let cancelled = false;
     (async () => {
       const sb = getSupabase();
-      const [cRes, chRes] = await Promise.all([
+      const [cRes, chRes, stRes] = await Promise.all([
         sb.from("group_buy_campaigns")
           .select("id, campaign_no, name, status, pickup_deadline")
           .eq("id", campaignId).maybeSingle(),
         sb.from("line_channels")
           .select("id, name, home_store_id").eq("is_active", true).order("name"),
+        sb.from("stores")
+          .select("id, code, name").eq("is_active", true).order("name"),
       ]);
       if (cancelled) return;
       if (cRes.error) { setError(cRes.error.message); return; }
@@ -120,6 +131,7 @@ export default function OrderEntryPage() {
       if (chRes.data && chRes.data.length > 0) {
         setChannelId((chRes.data[0] as Channel).id);
       }
+      setStores((stRes.data ?? []) as Store[]);
       // 一次抓活動內全部 SKU 給 dropdown 用
       const { data: skuData } = await getSupabase().rpc("rpc_search_skus_for_campaign", {
         p_campaign_id: campaignId, p_term: "", p_limit: 50,
@@ -209,12 +221,43 @@ export default function OrderEntryPage() {
     );
   }
 
-  // 全域快速鍵：Alt+N 加新顧客（避開 Ctrl+N 被瀏覽器搶走）、Ctrl+S 送出
+  // ---- internal mode helpers ----
+  function updateInternalItem(idx: number, patch: Partial<ItemRow>) {
+    setInternalItems((items) => items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  }
+  function addInternalItemRow() {
+    setInternalItems((items) => [...items, emptyItem()]);
+  }
+  function removeInternalItem(idx: number) {
+    setInternalItems((items) => {
+      const next = items.filter((_, i) => i !== idx);
+      return next.length ? next : [emptyItem()];
+    });
+  }
+  function addInternalSku(opt: SkuOption) {
+    setInternalItems((items) => {
+      if (items.some((it) => it.campaign_item_id === opt.campaign_item_id)) return items;
+      const newRow: ItemRow = {
+        campaign_item_id: opt.campaign_item_id,
+        sku_label: `${opt.product_name}${opt.variant_name ? ` / ${opt.variant_name}` : ""} (${opt.sku_code})`,
+        qty: "1",
+        unit_price: Number(opt.unit_price),
+      };
+      const cleaned = items.filter((it) => it.campaign_item_id || it.qty);
+      return [...cleaned, newRow];
+    });
+  }
+
+  // 全域快速鍵：Alt+N 加新顧客 / 加新項目、Ctrl+S 送出
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        setEntries((es) => [...es, newEntry()]);
+        if (mode === "internal") {
+          setInternalItems((items) => [...items, emptyItem()]);
+        } else {
+          setEntries((es) => [...es, newEntry()]);
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
@@ -224,11 +267,15 @@ export default function OrderEntryPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, channelId]);
+  }, [entries, channelId, mode, internalStoreId, internalItems, internalNotes]);
 
   async function handleSubmit() {
     if (submitting) return;
     setError(null);
+    if (mode === "internal") {
+      await submitInternal();
+      return;
+    }
     if (!channelId) { setError("請選 LINE 頻道"); return; }
     const noStore = entries.filter((e) => e.member_id && !e.pickup_store_id).map((e) => e.display_name);
     if (noStore.length > 0) { setError(`下列顧客未設預設取貨店：${noStore.join("、")}（請先在會員資料設 home_store_id）`); return; }
@@ -266,6 +313,43 @@ export default function OrderEntryPage() {
     }
   }
 
+  async function submitInternal() {
+    if (!internalStoreId) { setError("請選取貨店"); return; }
+    const items = internalItems
+      .filter((i) => i.campaign_item_id && Number(i.qty) > 0)
+      .map((i) => ({
+        campaign_item_id: i.campaign_item_id,
+        qty: Number(i.qty),
+        unit_price: i.unit_price,
+      }));
+    if (items.length === 0) { setError("請至少加一項商品"); return; }
+    if (items.some((i) => i.unit_price < 0)) { setError("單價不能為負"); return; }
+
+    setSubmitting(true);
+    try {
+      const sb = getSupabase();
+      const { data: userRes } = await sb.auth.getUser();
+      const operator = userRes.user?.id;
+      if (!operator) { setError("未登入或 session 過期"); return; }
+      const { data, error: err } = await sb.rpc("rpc_create_store_internal_order", {
+        p_campaign_id: campaignId,
+        p_store_id: internalStoreId,
+        p_items: items,
+        p_operator: operator,
+        p_notes: internalNotes.trim() || null,
+      });
+      if (err) { setError(err.message); return; }
+      setToast(`已建立內部訂單 #${data}`);
+      setInternalItems([emptyItem()]);
+      setInternalNotes("");
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (!Number.isFinite(campaignId)) {
     return <div className="p-6 text-sm text-red-600">無效的活動 ID</div>;
   }
@@ -286,17 +370,49 @@ export default function OrderEntryPage() {
           )}
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <kbd className="rounded border px-1">Alt+N</kbd> 新顧客
+          <kbd className="rounded border px-1">Alt+N</kbd> {mode === "internal" ? "新項目" : "新顧客"}
           <kbd className="rounded border px-1">Ctrl+S</kbd> 送出
         </div>
       </header>
 
-      <p className="text-xs text-zinc-500">
-        LINE 頻道：<span className="font-medium text-zinc-700 dark:text-zinc-300">
-          {channels.find((c) => c.id === channelId)?.name ?? "—"}
-        </span>
-        　·　取貨店：依顧客的「預設取貨店」自動帶出（會員資料設定）
-      </p>
+      <div className="inline-flex w-fit overflow-hidden rounded-md border border-zinc-300 text-xs dark:border-zinc-700">
+        <button
+          type="button"
+          onClick={() => setMode("customer")}
+          className={`px-3 py-1.5 ${
+            mode === "customer"
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          }`}
+        >
+          客戶下單
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("internal")}
+          className={`px-3 py-1.5 ${
+            mode === "internal"
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          }`}
+          title="店長為自己店內部叫貨（會自動掛內部會員、可改價）"
+        >
+          為分店叫貨
+        </button>
+      </div>
+
+      {mode === "customer" ? (
+        <p className="text-xs text-zinc-500">
+          LINE 頻道：<span className="font-medium text-zinc-700 dark:text-zinc-300">
+            {channels.find((c) => c.id === channelId)?.name ?? "—"}
+          </span>
+          　·　取貨店：依顧客的「預設取貨店」自動帶出（會員資料設定）
+        </p>
+      ) : (
+        <p className="text-xs text-zinc-500">
+          內部叫貨：客戶自動掛 <span className="font-medium text-zinc-700 dark:text-zinc-300">store_internal</span> 內部會員、訂單編號 <span className="font-mono">XXX-INT0001</span>。可改 unit_price（88 折出清）。
+        </p>
+      )}
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -309,53 +425,210 @@ export default function OrderEntryPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
-        <div className="flex flex-col gap-3">
-          {entries.map((e) => (
-            <CustomerCard
-              key={e.key}
-              entry={e}
-              campaignId={campaignId}
-              channelId={channelId}
-              campaignSkus={campaignSkus}
-              pickedMemberIds={
-                new Set(
-                  entries
-                    .filter((x) => x.key !== e.key && x.member_id != null)
-                    .map((x) => x.member_id as number)
-                )
-              }
-              onChange={(patch) => updateEntry(e.key, patch)}
-              onItemChange={(idx, patch) => updateItem(e.key, idx, patch)}
-              onAddItem={() => addItem(e.key)}
-              onRemoveItem={(idx) => removeItem(e.key, idx)}
-              onAddSku={(opt) => addSku(e.key, opt)}
-              onRemove={() =>
-                setEntries((es) => (es.length > 1 ? es.filter((x) => x.key !== e.key) : es))
-              }
-            />
-          ))}
-          <button
-            type="button"
-            onClick={() => setEntries((es) => [...es, newEntry()])}
-            className="rounded-md border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
-            + 新增顧客（Alt+N）
-          </button>
-          <div className="flex justify-end">
+      {mode === "customer" ? (
+        <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+          <div className="flex flex-col gap-3">
+            {entries.map((e) => (
+              <CustomerCard
+                key={e.key}
+                entry={e}
+                campaignId={campaignId}
+                channelId={channelId}
+                campaignSkus={campaignSkus}
+                pickedMemberIds={
+                  new Set(
+                    entries
+                      .filter((x) => x.key !== e.key && x.member_id != null)
+                      .map((x) => x.member_id as number)
+                  )
+                }
+                onChange={(patch) => updateEntry(e.key, patch)}
+                onItemChange={(idx, patch) => updateItem(e.key, idx, patch)}
+                onAddItem={() => addItem(e.key)}
+                onRemoveItem={(idx) => removeItem(e.key, idx)}
+                onAddSku={(opt) => addSku(e.key, opt)}
+                onRemove={() =>
+                  setEntries((es) => (es.length > 1 ? es.filter((x) => x.key !== e.key) : es))
+                }
+              />
+            ))}
             <button
               type="button"
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              onClick={() => setEntries((es) => [...es, newEntry()])}
+              className="rounded-md border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
-              {submitting ? "送出中…" : "送出訂單（Ctrl+S）"}
+              + 新增顧客（Alt+N）
             </button>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {submitting ? "送出中…" : "送出訂單（Ctrl+S）"}
+              </button>
+            </div>
+          </div>
+
+          <SummaryPanel entries={entries} />
+        </div>
+      ) : (
+        <InternalOrderPanel
+          campaignId={campaignId}
+          campaignSkus={campaignSkus}
+          stores={stores}
+          storeId={internalStoreId}
+          onStoreChange={setInternalStoreId}
+          notes={internalNotes}
+          onNotesChange={setInternalNotes}
+          items={internalItems}
+          onItemChange={updateInternalItem}
+          onAddItem={addInternalItemRow}
+          onRemoveItem={removeInternalItem}
+          onAddSku={addInternalSku}
+          onSubmit={handleSubmit}
+          submitting={submitting}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Internal Order Panel — 店長為自己店叫貨
+// ============================================================
+function InternalOrderPanel({
+  campaignId, campaignSkus, stores, storeId, onStoreChange,
+  notes, onNotesChange, items, onItemChange, onAddItem, onRemoveItem, onAddSku,
+  onSubmit, submitting,
+}: {
+  campaignId: number;
+  campaignSkus: SkuOption[];
+  stores: Store[];
+  storeId: number | null;
+  onStoreChange: (id: number | null) => void;
+  notes: string;
+  onNotesChange: (s: string) => void;
+  items: ItemRow[];
+  onItemChange: (idx: number, patch: Partial<ItemRow>) => void;
+  onAddItem: () => void;
+  onRemoveItem: (idx: number) => void;
+  onAddSku: (opt: SkuOption) => void;
+  onSubmit: () => void;
+  submitting: boolean;
+}) {
+  const pickedIds = new Set(items.map((it) => it.campaign_item_id).filter((x): x is number => x != null));
+  const availableSkus = campaignSkus.filter((s) => !pickedIds.has(s.campaign_item_id));
+  const totalQty = items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  const totalAmount = items.reduce((s, it) => {
+    const q = Number(it.qty);
+    return s + (Number.isFinite(q) && q > 0 ? q * it.unit_price : 0);
+  }, 0);
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+      <div className="flex flex-col gap-3">
+        <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-3 grid gap-3 sm:grid-cols-[200px_1fr]">
+            <label className="text-xs">
+              <span className="mb-1 block text-zinc-500">取貨店 <span className="text-red-500">*</span></span>
+              <select
+                value={storeId ?? ""}
+                onChange={(e) => onStoreChange(e.target.value ? Number(e.target.value) : null)}
+                className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                <option value="">— 選店 —</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs">
+              <span className="mb-1 block text-zinc-500">備註（選填）</span>
+              <input
+                value={notes}
+                onChange={(e) => onNotesChange(e.target.value)}
+                placeholder="預設【店長內部叫貨】"
+                className="w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              />
+            </label>
+          </div>
+
+          <table className="w-full text-xs">
+            <thead className="text-zinc-500">
+              <tr>
+                <th className="text-left">商品</th>
+                <th className="w-20 text-right">數量</th>
+                <th className="w-24 text-right">單價（可改）</th>
+                <th className="w-24 text-right">小計</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, idx) => (
+                <ItemEditorRow
+                  key={idx}
+                  campaignId={campaignId}
+                  item={it}
+                  isLast={idx === items.length - 1}
+                  editablePrice
+                  onChange={(patch) => onItemChange(idx, patch)}
+                  onAddNext={onAddItem}
+                  onRemove={() => onRemoveItem(idx)}
+                />
+              ))}
+            </tbody>
+          </table>
+
+          <div className="mt-2 flex justify-end">
+            <select
+              value=""
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                const opt = availableSkus.find((s) => s.campaign_item_id === id);
+                if (opt) onAddSku(opt);
+                e.target.value = "";
+              }}
+              disabled={availableSkus.length === 0}
+              className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
+            >
+              <option value="">+ 加商品{availableSkus.length === 0 ? "（已全選）" : ""}</option>
+              {availableSkus.map((s) => (
+                <option key={s.campaign_item_id} value={s.campaign_item_id}>
+                  {s.product_name}{s.variant_name ? ` / ${s.variant_name}` : ""} (${Number(s.unit_price)})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        <SummaryPanel entries={entries} />
+        <button
+          type="button"
+          onClick={onAddItem}
+          className="rounded-md border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          + 新增空白項目（Alt+N）
+        </button>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting}
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {submitting ? "送出中…" : "送出內部訂單（Ctrl+S）"}
+          </button>
+        </div>
       </div>
+
+      <aside className="sticky top-4 h-fit rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="mb-2 text-sm font-semibold">本次統計（內部）</h2>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <Stat label="件數" value={totalQty} />
+          <Stat label="總金額" value={`$${totalAmount}`} />
+        </div>
+      </aside>
     </div>
   );
 }
@@ -622,11 +895,12 @@ function CustomerSearch({
 // Item Editor Row
 // ============================================================
 function ItemEditorRow({
-  campaignId, item, isLast, onChange, onAddNext, onRemove,
+  campaignId, item, isLast, editablePrice, onChange, onAddNext, onRemove,
 }: {
   campaignId: number;
   item: ItemRow;
   isLast: boolean;
+  editablePrice?: boolean;
   onChange: (patch: Partial<ItemRow>) => void;
   onAddNext: () => void;
   onRemove: () => void;
@@ -716,7 +990,26 @@ function ItemEditorRow({
           }`}
         />
       </td>
-      <td className="text-right font-mono text-xs text-zinc-500">${item.unit_price}</td>
+      <td className="text-right">
+        {editablePrice ? (
+          <input
+            value={item.unit_price}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onChange({ unit_price: Number.isFinite(n) ? n : 0 });
+            }}
+            inputMode="decimal"
+            className={`w-20 rounded border px-2 py-1 text-right text-xs ${
+              item.unit_price < 0
+                ? "border-red-400 bg-red-50 dark:bg-red-950"
+                : "border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-800"
+            }`}
+            title="可改價（88 折出清）"
+          />
+        ) : (
+          <span className="font-mono text-xs text-zinc-500">${item.unit_price}</span>
+        )}
+      </td>
       <td className="text-right font-mono text-xs">${subtotal}</td>
       <td className="text-right">
         <button type="button" onClick={onRemove} className="text-zinc-400 hover:text-red-500">×</button>
